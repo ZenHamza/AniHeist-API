@@ -13,6 +13,7 @@ from src.utils.logger import get_logger
 from src.models.stream import StreamResult, ParserError, AnimeNotFoundError
 from src.cache.redis_cache import get_cache
 from src.proxy_pool import ProxyPool
+from src.config import settings
 
 log = get_logger(__name__)
 
@@ -33,9 +34,10 @@ async def _get_client() -> httpx.AsyncClient:
     return _client
 
 # Provider priority order — only confirmed working CDNs
-# Working: ally (wixmp.com — AWS CloudFront), pewe (anidb.app)
-# Blocked from VPS: bonk (vibeplayer.site), kiwi (uwucdn.top), bee (nekostream.site), moo (animegg.org), hop
-PROVIDER_ORDER = ["ally", "pewe"]
+# Working directly from VPS: ally (wixmp.com), pewe (anidb.app), kiwi (uwucdn.top with referer)
+# Working via Cloudflare Worker: bee (nekostream.site), moo (animegg.org)
+# Blocked/broken: bonk (vibeplayer.site — pipe returns empty streams), hop
+PROVIDER_ORDER = ["ally", "pewe", "kiwi", "bee", "moo"]
 
 
 def _encode(payload: dict) -> str:
@@ -186,50 +188,69 @@ class MiruroPipe:
                         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
                     }
                     # Quick CDN accessibility check — skip if blocked
-                    # Tries directly first, then via proxy pool if available
+                    # Tries: direct → proxy pool → Cloudflare Worker
                     fmt = "hls" if best.get("type") == "hls" else "mp4"
 
-                    async def _check_cdn(proxy_url: Optional[str] = None) -> Optional[bool]:
+                    async def _try_cdn(proxy_url: str = "") -> Optional[bool]:
                         kwargs = {"headers": stream_headers, "follow_redirects": True, "timeout": 3}
-                        if proxy_url:
-                            async with httpx.AsyncClient(timeout=3, proxy=proxy_url) as c:
+                        try:
+                            if proxy_url:
+                                async with httpx.AsyncClient(timeout=3, proxy=proxy_url) as c:
+                                    head = await c.head(best["url"], **kwargs)
+                            else:
+                                c = await _get_client()
                                 head = await c.head(best["url"], **kwargs)
-                                return None if head.status_code in (403, 401, 451) else True
-                        else:
-                            c = await _get_client()
-                            head = await c.head(best["url"], **kwargs)
                             return None if head.status_code in (403, 401, 451) else True
+                        except Exception:
+                            return None
 
-                    try:
-                        ok = await _check_cdn()
-                        if ok is None:
-                            log.warning("CDN blocked directly", provider=pname)
-                            # Try via proxy pool if available
-                            proxied = False
-                            if self._proxy_pool:
-                                pool = self._proxy_pool
-                                await pool.ensure_fresh()
-                                proxy_url = pool.get_proxy_url()
-                                if proxy_url:
-                                    ok2 = await _check_cdn(proxy_url=proxy_url)
-                                    if ok2:
-                                        log.info("CDN accessible via proxy", provider=pname, proxy=proxy_url[:40])
-                                        pool.mark_success()
-                                        proxied = True
-                                    else:
-                                        pool.mark_failure()
-                            if not proxied:
-                                last_error = f"{pname}: CDN blocked"
-                                continue
-                    except (httpx.ConnectTimeout, httpx.ReadTimeout, httpx.ConnectError):
-                        log.warning("CDN unreachable, skipping provider", provider=pname)
-                        last_error = f"{pname}: CDN unreachable"
-                        continue
-                    except Exception:
-                        pass
+                    cdn_ok = await _try_cdn()
+                    if cdn_ok is None:
+                        log.warning("CDN blocked/unreachable directly", provider=pname)
+                        proxied = False
+
+                        # Layer 1: proxy pool
+                        if self._proxy_pool:
+                            pool = self._proxy_pool
+                            await pool.ensure_fresh()
+                            p_url = pool.get_proxy_url()
+                            if p_url:
+                                if await _try_cdn(proxy_url=p_url):
+                                    log.info("CDN accessible via proxy", provider=pname, proxy=p_url[:40])
+                                    pool.mark_success()
+                                    proxied = True
+                                else:
+                                    pool.mark_failure()
+
+                        # Layer 2: Cloudflare Worker (CF→CF bypasses Cloudflare blocks)
+                        if not proxied and settings.cloudflare_worker_url:
+                            worker_base = settings.cloudflare_worker_url.rstrip("/")
+                            s_ref = best.get("referer") or f"https://{pname}.to/"
+                            import urllib.parse
+                            params = urllib.parse.urlencode({
+                                "url": best["url"], "referer": s_ref,
+                                "origin": s_ref.rstrip("/"),
+                            })
+                            cf_url = f"{worker_base}?{params}"
+                            try:
+                                async with httpx.AsyncClient(timeout=5) as c:
+                                    h = await c.head(cf_url, follow_redirects=True, timeout=5)
+                                if h.status_code == 200:
+                                    log.info("CDN accessible via Cloudflare Worker", provider=pname)
+                                    best["url"] = cf_url
+                                    best["_via_worker"] = True
+                                    proxied = True
+                            except Exception as we:
+                                log.warning("Cloudflare Worker check failed", provider=pname, error=str(we))
+
+                        if not proxied:
+                            last_error = f"{pname}: CDN blocked"
+                            continue
+
+                    via_worker = best.get("_via_worker", False)
                     return StreamResult(
                         url=best["url"],
-                        source=f"miruro/{pname}",
+                        source=f"miruro/{pname}{'/cf' if via_worker else ''}",
                         format=fmt,
                         headers=stream_headers,
                     )

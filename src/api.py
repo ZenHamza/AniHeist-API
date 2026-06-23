@@ -309,6 +309,20 @@ async def proxy_hls(
     # Detect scheme from forwarded headers (nginx proxy sets these)
     scheme = request.headers.get("X-Forwarded-Proto", request.url.scheme)
     
+    # Route through Cloudflare Worker if configured
+    worker_url = settings.cloudflare_worker_url
+    if worker_url:
+        worker_url = worker_url.rstrip("/")
+        params = urllib.parse.urlencode({"url": url, "referer": referer, "origin": origin})
+        cf_proxy = f"{worker_url}?{params}"
+        try:
+            async with httpx.AsyncClient(timeout=30) as client:
+                resp = await client.get(cf_proxy, follow_redirects=True)
+                content_type = resp.headers.get("content-type", "application/octet-stream")
+                return Response(content=resp.content, media_type=content_type)
+        except Exception as e:
+            log.warning("Cloudflare Worker proxy failed, falling back to direct", error=str(e))
+
     proxy_url = settings.get_proxy()
     async with httpx.AsyncClient(timeout=30, proxy=proxy_url) as client:
         try:

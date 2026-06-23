@@ -48,6 +48,7 @@ class Settings(BaseSettings):
 
     cors_origins: list[str] = ["*"]
     api_prefix: str = "/api"
+    cloudflare_worker_url: str = ""
 
     # Internal proxy rotation state
     _proxy_index: int = 0

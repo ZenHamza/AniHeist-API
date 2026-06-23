@@ -132,13 +132,14 @@ TABLE OF CONTENTS
       format    — "hls" (primary) or "mp4" (fallback). Use for player source type.
 
       source    — Which provider chain served this:
-                    miruro/ally  → wixmp.com CDN (AWS CloudFront, working ✓)
-                    miruro/pewe  → anidb.app CDN (working ✓)
-                    miruro/bonk  → vibeplayer.site (blocked from VPS)
-                    miruro/kiwi  → uwucdn.top (Cloudflare-blocked)
-                    miruro/bee   → nekostream.site (Cloudflare-blocked)
-                    miruro/moo   → animegg.org (Cloudflare-blocked)
-                    miruro/hop   → (unknown, blocked)
+                    miruro/ally    → wixmp.com CDN (AWS CloudFront) ✓
+                    miruro/pewe    → anidb.app CDN ✓
+                    miruro/pewe/cf → anidb.app CDN via Cloudflare Worker ✓
+                    miruro/kiwi    → uwucdn.top CDN ✓
+                    miruro/moo     → animegg.org CDN ✓
+                    miruro/bee     → same CDN as kiwi (wrong referer, blocked)
+                    miruro/bonk    → vibeplayer.site (pipe returns no streams)
+                    miruro/hop     → (no streams)
 
       headers   — Some CDNs require these Referer/Origin headers to serve
                   video segments. If your browser blocks the stream, proxy
@@ -422,9 +423,13 @@ TABLE OF CONTENTS
       const hls = new Hls();
       hls.loadSource(proxyUrl);
 
-    The endpoint fetches the .m3u8, rewrites all segment URLs to go through
-    itself (with proper headers), and returns the modified playlist. This
-    ensures every segment request includes the required Referer/Origin headers.
+    The endpoint first tries to route through the Cloudflare Worker
+    (aniheist-api.zenxhamza.workers.dev) if configured. If the Worker fails,
+    it falls back to direct proxy with header injection.
+
+    It fetches the .m3u8, rewrites all segment URLs to go through itself
+    (with proper headers), and returns the modified playlist. This ensures
+    every segment request includes the required Referer/Origin headers.
 
 ================================================================================
 
@@ -463,8 +468,20 @@ TABLE OF CONTENTS
     Provider names from this list can be passed as the `provider` parameter
     to /api/stream for server selection.
 
-    Working providers (from VPS): ally (wixmp.com), pewe (anidb.app)
-    Blocked providers (Cloudflare): bonk, kiwi, bee, moo, hop
+    Working providers (from VPS):
+      ally  → wixmp.com (direct, fastest)
+      pewe  → anidb.app (direct or via Cloudflare Worker)
+      kiwi  → uwucdn.top (direct with Referer header)
+      moo   → animegg.org (direct)
+
+    Blocked/broken:
+      bee   → same CDN as kiwi (uwucdn.top) but wrong Referer → 403
+      bonk  → pipe returns empty streams
+      hop   → no streams available
+
+    Source suffix "/cf" means the stream was proxied through the Cloudflare
+    Worker (aniheist-api.zenxhamza.workers.dev). This is transparent to you —
+    the video_url is already rewritten to point through the Worker.
 
 ================================================================================
 3.  FRONTEND INTEGRATION

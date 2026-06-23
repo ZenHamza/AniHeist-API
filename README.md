@@ -22,21 +22,27 @@
   
   ```mermaid
   graph LR
-      A[🎬 Frontend] --> B{🌐 api.aniheist.com}
-      B --> C[🎯 Miruro Pipe<br/>7 Providers]
-      C --> D[✅ ally - wixmp.com]
-      C --> E[✅ pewe - anidb.app]
-      C --> F[⛔ bonk/kiwi/bee/moo/hop]
-      B --> G[🔄 Proxy Pool<br/>300 SpeedX Proxies]
-      G --> F
-      B --> H[🔒 HLS Proxy<br/>Header Injection]
-      B --> I[📋 Provider Selector<br/>Choose Server]
-      
+      A[Frontend App] --> B{AniHeist API}
+      B --> C[Miruro Pipe - 5 Providers]
+      C --> D[ally - wixmp.com]
+      C --> E[pewe - anidb.app]
+      C --> F[kiwi - uwucdn.top]
+      C --> G[moo - animegg.org]
+      C --> H[bee - CDN blocked]
+      B --> I[Proxy Pool - 300 SpeedX]
+      I --> H
+      B --> J[Cloudflare Worker - CDN Bypass]
+      J --> H
+      B --> K[HLS Proxy - Header Injection]
+      B --> L[Provider Selector - UI Choice]
+
       style A fill:#1a1a2e,stroke:#e94560,color:#fff
       style B fill:#16213e,stroke:#0f3460,color:#fff
       style D fill:#1b4332,stroke:#40916c,color:#fff
       style E fill:#1b4332,stroke:#40916c,color:#fff
-      style F fill:#4a0e0e,stroke:#e94560,color:#fff
+      style F fill:#1b4332,stroke:#40916c,color:#fff
+      style G fill:#1b4332,stroke:#40916c,color:#fff
+      style H fill:#4a0e0e,stroke:#e94560,color:#fff
   ```
   
 </div>
@@ -50,16 +56,16 @@
 <table>
 <tr>
 <td width="33%" align="center">
-  <h3>🎯 Dual-Core Engine</h3>
-  <p>Miruro pipe API with 7 built-in providers + proxy pool retry for blocked CDNs. Auto-failover with circuit breaker pattern.</p>
+  <h3>Multi-Provider Engine</h3>
+  <p>Miruro pipe API with 5 providers (4 working). Tiered fallback: direct CDN check, proxy pool retry, then Cloudflare Worker bypass.</p>
 </td>
 <td width="33%" align="center">
-  <h3>🛡️ Proxy Infrastructure</h3>
-  <p>300 free SpeedX proxies loaded on startup, auto-refresh on failure, rotating pool. BrightData/sing-box ready.</p>
+  <h3>Proxy + CDN Bypass</h3>
+  <p>300 free SpeedX proxies auto-refresh on failure. Cloudflare Worker as last-resort to reach Cloudflare-protected CDNs. BrightData/sing-box ready.</p>
 </td>
 <td width="33%" align="center">
-  <h3>🎮 Server Selection</h3>
-  <p>Users can pick specific providers (ally, pewe) or backend sources (miruro, reanime) via URL params. Provider listing endpoint included.</p>
+  <h3>Server Selection</h3>
+  <p>Users pick providers (ally/pewe/kiwi/moo) or backend source (miruro/reanime) via URL params. Provider listing endpoint for UI dropdowns.</p>
 </td>
 </tr>
 </table>
@@ -93,14 +99,14 @@ https://api.aniheist.com
 | `GET` | `/api/stream?anime_id={id}&episode={n}` | Get stream URL (HLS/MP4) |
 | `GET` | `/api/stream?anime_id={id}&episode={n}&provider=pewe` | Get stream from specific provider |
 | `GET` | `/api/stream?anime_id={id}&episode={n}&source=reanime` | Get stream from specific source |
-| `GET` | `/api/anime/{id}/providers` | List available providers for anime |
+| `GET` | `/api/anime/{id}/providers` | List available providers for anime UI picker |
 | `GET` | `/api/search?q={query}` | Search anime by title |
 | `GET` | `/api/anime/{id}` | Get anime details & episodes |
 | `GET` | `/api/trending` | Trending anime |
 | `GET` | `/api/popular` | Popular anime |
 | `GET` | `/api/health` | Service health status |
 | `GET` | `/api/proxy/status` | Proxy pool status |
-| `GET` | `/api/proxy/hls?url=...` | HLS segment proxy with header injection |
+| `GET` | `/api/proxy/hls?url=...` | HLS segment proxy (routes through Cloudflare Worker if available) |
 
 <br/>
 
@@ -143,13 +149,15 @@ https://api.aniheist.com
 ### Source Priority Chain
 
 ```
-Miruro Pipe API (ally → pewe)     →  200ms - 1s
-        ↓ (fallback if CDN 403, retry via proxy pool)
-Proxy Pool (300 SpeedX proxies)   →  Auto-refresh on failure
-        ↓ (fallback if no stream)
-Playwright Browser (miruro.to)    →  3s - 8s (last resort)
-        ↓ (only if explicitly requested, Cloudflare-blocked)
-ReAnime API (reanime.to)          →  Cloudflare-blocked
+Miruro Pipe API (ally / pewe / kiwi / moo)  →  200ms - 1s
+        ↓ (CDN returns 403)
+Proxy Pool (300 SpeedX proxies)             →  Auto-refresh on failure
+        ↓ (proxy also blocked)
+Cloudflare Worker (CF network bypass)       →  Can reach CF-protected CDNs
+        ↓ (all CDN attempts failed)
+Playwright Browser (miruro.to)              →  3s - 8s (last resort, fragile)
+        ↓ (only if explicitly requested)
+ReAnime API (reanime.to)                    →  Cloudflare-blocked from VPS
 ```
 
 <br/>
@@ -229,7 +237,7 @@ docker compose up -d --force-recreate api
 | Cache TTL | 600s (stream, per-provider), 3600s (metadata) |
 | Rate limit | 30 req/min per IP |
 | Circuit breaker | 5 failures → 60s cooldown |
-| Providers covered | 7 (2 confirmed working CDNs from VPS) |
+| Providers covered | 5 (4 confirmed working CDNs from VPS) |
 | Proxy pool | 300 SpeedX proxies (auto-refresh on failure) |
 | Anime coverage | ~10,000+ titles via AniList |
 
@@ -284,6 +292,7 @@ AniHeist-API/
 ├── Dockerfile             # API container
 ├── nginx.conf             # Reverse proxy config
 ├── requirements.txt       # Python dependencies
+├── video-proxy-worker.js  # Cloudflare Worker for CDN bypass
 └── .env.example           # Configuration template
 ```
 
