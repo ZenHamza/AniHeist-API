@@ -18,34 +18,22 @@
 
 <br/>
 
-<div align="center">
-  
-  ```mermaid
-  graph LR
-      A[Frontend App] --> B{AniHeist API}
-      B --> C[Miruro Pipe - 5 Providers]
-      C --> D[ally - wixmp.com]
-      C --> E[pewe - anidb.app]
-      C --> F[kiwi - uwucdn.top]
-      C --> G[moo - animegg.org]
-      C --> H[bee - CDN blocked]
-      B --> I[Proxy Pool - 300 SpeedX]
-      I --> H
-      B --> J[Cloudflare Worker - CDN Bypass]
-      J --> H
-      B --> K[HLS Proxy - Header Injection]
-      B --> L[Provider Selector - UI Choice]
-
-      style A fill:#1a1a2e,stroke:#e94560,color:#fff
-      style B fill:#16213e,stroke:#0f3460,color:#fff
-      style D fill:#1b4332,stroke:#40916c,color:#fff
-      style E fill:#1b4332,stroke:#40916c,color:#fff
-      style F fill:#1b4332,stroke:#40916c,color:#fff
-      style G fill:#1b4332,stroke:#40916c,color:#fff
-      style H fill:#4a0e0e,stroke:#e94560,color:#fff
-  ```
-  
-</div>
+```mermaid
+graph TD
+    A[Frontend App] --> B{AniHeist API}
+    B --> C[Miruro Pipe - 5 providers]
+    C --> D[ally - wixmp.com]
+    C --> E[pewe - anidb.app]
+    C --> F[kiwi - uwucdn.top]
+    C --> G[moo - animegg.org]
+    C --> H[bee - blocked]
+    B --> I[Proxy Pool - 300 SpeedX]
+    I --> H
+    B --> J[Cloudflare Worker - CDN bypass]
+    J --> H
+    B --> K[HLS Proxy - header inj]
+    B --> L[Provider Selector]
+```
 
 <br/>
 
