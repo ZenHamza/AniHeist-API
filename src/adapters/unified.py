@@ -13,6 +13,7 @@ from src.adapters.reanime import ReAnimeAdapter
 from src.models.stream import StreamResult, ParserError
 from src.utils.logger import get_logger
 from consumet_api.miruro_pipe import MiruroPipe
+from src.proxy_pool import get_proxy_pool
 
 log = get_logger(__name__)
 
@@ -27,42 +28,63 @@ class UnifiedAdapter(BaseAdapter):
 
     def __init__(self, browser_pool=None):
         super().__init__()
-        self.miruro_pipe = MiruroPipe()
+        self._proxy_pool = None
+        self.miruro_pipe = MiruroPipe(proxy_pool=None)
         self.miruro_pw = MiruroAdapter(browser_pool=browser_pool)
         self.reanime = ReAnimeAdapter()
+
+    async def _ensure_proxy_pool(self):
+        if self._proxy_pool is None:
+            try:
+                self._proxy_pool = await get_proxy_pool()
+                self.miruro_pipe._proxy_pool = self._proxy_pool
+                log.info("Proxy pool initialized", nodes=len(self._proxy_pool.nodes))
+            except Exception as e:
+                log.warning("Failed to initialize proxy pool", error=str(e))
         
 
     async def get_video_url(self, anime_id: str, episode: int, **kwargs) -> StreamResult:
         anilist_id = int(anime_id) if anime_id.isdigit() else 0
         category = "dub" if kwargs.get("dub") else "sub"
+        provider = kwargs.get("provider") or ""
+        source = kwargs.get("source") or ""
 
+        await self._ensure_proxy_pool()
         errors = []
 
+        preferred = None
+        if provider:
+            preferred = [p.strip() for p in provider.split(",")]
+
         # 1. Miruro Pipe API (primary - miruro.to internal backend)
-        if anilist_id > 0:
+        if anilist_id > 0 and source in ("", "miruro"):
             try:
-                log.info("Trying Miruro pipe", anime_id=anilist_id, episode=episode)
-                result = await self.miruro_pipe.get_stream(anilist_id, episode, category=category)
+                log.info("Trying Miruro pipe", anime_id=anilist_id, episode=episode, provider=preferred)
+                result = await self.miruro_pipe.get_stream(
+                    anilist_id, episode, category=category, preferred_providers=preferred
+                )
                 return result
             except Exception as e:
                 errors.append(f"miruro_pipe: {e}")
                 log.warning("Miruro pipe failed", error=str(e))
 
-        # 2. ReAnime API (reanime.to + flixcloud.cc) - fallback with English subs
-        try:
-            log.info("Trying ReAnime", anime_id=anime_id, episode=episode)
-            return await self.reanime.get_video_url(anime_id, episode, **kwargs)
-        except Exception as e:
-            errors.append(f"reanime: {e}")
-            log.warning("ReAnime failed", error=str(e))
+        # 2. ReAnime API (reanime.to + flixcloud.cc) - only when explicitly requested (Cloudflare-blocked)
+        if source == "reanime":
+            try:
+                log.info("Trying ReAnime", anime_id=anime_id, episode=episode)
+                return await self.reanime.get_video_url(anime_id, episode, **kwargs)
+            except Exception as e:
+                errors.append(f"reanime: {e}")
+                log.warning("ReAnime failed", error=str(e))
 
         # 3. Playwright Miruro (last resort)
-        try:
-            log.info("Trying Miruro Playwright", anime_id=anime_id, episode=episode)
-            return await self.miruro_pw.get_video_url(anime_id, episode, **kwargs)
-        except Exception as e:
-            errors.append(f"miruro_pw: {e}")
-            log.warning("Miruro Playwright failed", error=str(e))
+        if source in ("", "playwright"):
+            try:
+                log.info("Trying Miruro Playwright", anime_id=anime_id, episode=episode)
+                return await self.miruro_pw.get_video_url(anime_id, episode, **kwargs)
+            except Exception as e:
+                errors.append(f"miruro_pw: {e}")
+                log.warning("Miruro Playwright failed", error=str(e))
 
         raise ParserError(f"All providers failed: {'; '.join(errors)}")
 

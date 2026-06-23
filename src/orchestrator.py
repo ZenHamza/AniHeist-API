@@ -50,6 +50,8 @@ class Orchestrator:
         episode: int,
         dub: bool = False,
         quality: Optional[str] = None,
+        provider: Optional[str] = None,
+        source: Optional[str] = None,
     ) -> StreamResult:
         if not self._initialized:
             await self.initialize()
@@ -59,11 +61,13 @@ class Orchestrator:
         if not episode or episode < 1:
             raise ValidationError("Invalid episode: must be a positive integer")
 
+        cache_provider = provider or ""
+        cache_source = source or ""
         cache = await get_cache()
 
-        cached = await cache.get_stream(anime_id, episode)
+        cached = await cache.get_stream(anime_id, episode, provider=cache_provider, source=cache_source)
         if cached:
-            log.info("Cache hit for stream", anime_id=anime_id, episode=episode)
+            log.info("Cache hit for stream", anime_id=anime_id, episode=episode, provider=provider)
             return StreamResult(from_cache=True,
                 url=cached["url"],
                 source=cached.get("source", "cache"),
@@ -77,12 +81,18 @@ class Orchestrator:
 
         anime_id_str = str(anime_id)
 
+        extra_kwargs = {}
+        if provider:
+            extra_kwargs["provider"] = provider
+        if source:
+            extra_kwargs["source"] = source
         result = await self.fallback_manager.get_stream(
             adapters=self._adapters,
             anime_id=anime_id_str,
             episode=episode,
             dub=dub,
             quality=quality,
+            **extra_kwargs,
         )
 
         try:
@@ -98,7 +108,7 @@ class Orchestrator:
                     {"source": a.source, "error": a.error, "latency_ms": a.latency_ms}
                     for a in (result.fallback_attempts or [])
                 ],
-            })
+            }, provider=cache_provider, source=cache_source)
         except Exception as e:
             log.warning("Failed to cache stream result", error=str(e))
 

@@ -63,12 +63,22 @@ class RedisCache:
     def _key(self, prefix: str, *parts: str) -> str:
         return f"{self.KEY_PREFIXES.get(prefix, prefix)}:{':'.join(parts)}"
 
-    async def get_stream(self, anime_id: int, episode: int) -> Optional[dict]:
-        key = self._key("stream", str(anime_id), str(episode))
+    async def get_stream(self, anime_id: int, episode: int, provider: str = "", source: str = "") -> Optional[dict]:
+        parts = [str(anime_id), str(episode)]
+        if source:
+            parts.append(f"src={source}")
+        if provider:
+            parts.append(provider)
+        key = self._key("stream", *parts)
         return await self._get_json(key)
 
-    async def set_stream(self, anime_id: int, episode: int, data: dict, ttl: int = settings.redis_stream_ttl):
-        key = self._key("stream", str(anime_id), str(episode))
+    async def set_stream(self, anime_id: int, episode: int, data: dict, provider: str = "", source: str = "", ttl: int = settings.redis_stream_ttl):
+        parts = [str(anime_id), str(episode)]
+        if source:
+            parts.append(f"src={source}")
+        if provider:
+            parts.append(provider)
+        key = self._key("stream", *parts)
         await self._set_json(key, data, ttl)
 
     async def get_source_health(self, source: str) -> Optional[dict]:

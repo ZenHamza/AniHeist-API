@@ -75,6 +75,8 @@ async def get_stream(
     episode: int = Query(..., description="Episode number (1-indexed)", ge=1),
     dub: bool = Query(False, description="Prefer dubbed version"),
     quality: Optional[str] = Query(None, description="Preferred quality (e.g., 720p, 1080p)"),
+    provider: Optional[str] = Query(None, description="Specific Miruro provider (ally,pewe,bonk,kiwi,bee) or comma-separated priority list"),
+    source: Optional[str] = Query(None, description="Source backend: miruro, reanime, or playwright"),
 ):
     start_time = time.monotonic()
 
@@ -84,6 +86,8 @@ async def get_stream(
         episode=episode,
         dub=dub,
         quality=quality,
+        provider=provider,
+        source=source,
         ip=request.client.host if request.client else "unknown",
     )
 
@@ -92,6 +96,8 @@ async def get_stream(
         episode=episode,
         dub=dub,
         quality=quality,
+        provider=provider,
+        source=source,
     )
 
     response_time_ms = round((time.monotonic() - start_time) * 1000, 1)
@@ -248,6 +254,33 @@ async def popular_anime(
     }
 
 
+@app.get(f"{settings.api_prefix}/anime/{{anime_id}}/providers")
+@rate_limiter.limit("60/minute")
+async def get_providers(
+    request: Request,
+    anime_id: int = Path(..., description="AniList anime ID", ge=1),
+):
+    start_time = time.monotonic()
+    log.info("Providers request", anime_id=anime_id)
+
+    try:
+        from consumet_api.miruro_pipe import MiruroPipe
+        mp = MiruroPipe()
+        providers = await mp.get_providers_for_anime(anime_id)
+        response_time_ms = round((time.monotonic() - start_time) * 1000, 1)
+        return {
+            "status": "success",
+            "data": {
+                "anime_id": anime_id,
+                "providers": providers,
+            },
+            "meta": {"response_time_ms": response_time_ms},
+        }
+    except Exception as e:
+        return JSONResponse(status_code=404, content={
+            "status": "error",
+            "error": {"code": "PROVIDERS_NOT_FOUND", "message": str(e)},
+        })
 
 
 @app.get(f"{settings.api_prefix}/proxy/hls")
@@ -312,11 +345,18 @@ async def proxy_status():
     from src.proxy_pool import get_proxy_pool
     pool = await get_proxy_pool()
     config_proxy = settings.get_proxy() or None
+    speedx_counts = {"http": 0, "socks4": 0, "socks5": 0}
+    for node in pool.nodes:
+        proto = node.protocol
+        if proto in speedx_counts:
+            speedx_counts[proto] += 1
     return {
         "brightdata_configured": bool(settings.brightdata_username and settings.brightdata_password),
         "proxy_list_size": len(settings.proxy_list),
         "proxy_pool_nodes": len(pool.nodes),
         "active_proxy": config_proxy or pool.get_proxy_url(),
+        "speedx_enabled": True,
+        "speedx_sources": speedx_counts,
     }
 
 @app.post(f"{settings.api_prefix}/fallback/reset")

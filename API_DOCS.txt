@@ -1,140 +1,187 @@
 ================================================================================
-  ANIHEIST API — COMPLETE INTEGRATION GUIDE
+  ANIHEIST API — COMPLETE FRONTEND INTEGRATION GUIDE
   Base URL: https://api.aniheist.com
   Version: 1.0.0
 ================================================================================
 
-This document explains how the Anime Stream Scraper API works so you can
-build or update a frontend website to consume it.
+  This document is for frontend developers building against the AniHeist API.
+  Every endpoint, response shape, and integration detail is here.
 
-The API provides EVERYTHING from a single endpoint — metadata, search, trending,
-AND video stream URLs. No need to call AniList directly (though you can).
+  TL;DR:
+    - Call /api/stream with an AniList ID + episode number → get an HLS URL
+    - Plug that URL into hls.js → video plays
+    - Search, trending, anime metadata all available via the API
+    - No auth key needed. No CORS issues from the API itself.
 
-ARCHITECTURE:
-  Your Frontend ──► api.aniheist.com/api/*  →  Everything unified
-                     │
-                     ├── /api/stream   →  3-layer provider fallback:
-                     │                    1. Anivexa Worker (Cloudflare Edge)
-                     │                       ├── anikoto (Solaris)  ✅ 1080p HLS
-                     │                       ├── reanime (Orion)    ✅ HLS + English subs
-                     │                       ├── animepahe (Astra)  ✅ HLS
-                     │                       ├── allmanga (Titan)   ✅ MP4
-                     │                       ├── animegg            ✅ HLS
-                     │                       ├── anineko (Lynx)     ✅ HLS
-                     │                       └── anidbapp (Nexus)   ✅ HLS
-                     │                    2. Miruro Pipe (VPS, 7 providers)
-                     │                    3. Playwright browser (last resort)
-                     │
-                     ├── /api/search, /api/anime/{id}  →  AniList GraphQL
-                     ├── /api/trending, /api/popular   →  AniList GraphQL
-                     └── Redis cache (10min TTL for streams)
+================================================================================
+TABLE OF CONTENTS
+================================================================================
+
+  1.  QUICK START
+  2.  ENDPOINTS
+    2.1  GET /api/stream          — Get video stream URL (primary)
+    2.2  GET /api/search           — Search anime by title
+    2.3  GET /api/anime/{id}       — Full anime metadata
+    2.4  GET /api/anime/{id}/episodes — Episode list
+    2.5  GET /api/trending         — Trending anime
+    2.6  GET /api/popular          — All-time popular anime
+    2.7  GET /api/health           — API health status
+    2.8  GET /api/proxy/status     — Proxy pool status
+    2.9  GET /api/proxy/hls        — HLS segment proxy with header injection
+    2.10 GET /api/anime/{id}/providers — List available providers
+  3.  FRONTEND INTEGRATION
+    3.1  hls.js integration (recommended)
+    3.2  Video.js integration
+  3.3  React / Next.js integration
+  3.4  Server Selection UI (provider picker)
+  3.5  Error handling & states
+  4.  RATE LIMITING
+  5.  PERFORMANCE
+  6.  TROUBLESHOOTING
 
 ================================================================================
 1.  QUICK START
 ================================================================================
 
-  Fetch a stream URL for any anime episode (returns in ~1 second):
+   1. Fetch a stream:
 
-    https://api.aniheist.com/api/stream?anime_id=16498&episode=1
+      curl "https://api.aniheist.com/api/stream?anime_id=1535&episode=1"
 
-  The API returns a direct .m3u8 (HLS) video URL that you plug into hls.js.
-  No Playwright/browser needed. No Cloudflare issues. Just fast HTTP requests.
+   2. Response:
+
+      {
+        "status": "success",
+        "data": {
+          "video_url": "https://repackager.wixmp.com/.../master.m3u8",
+          "format": "hls",
+          "source": "miruro/ally",
+          "subtitles": [],
+          "headers": {
+            "Referer": "https://allmanga.to/",
+            "Origin": "https://allmanga.to"
+          }
+        }
+      }
+
+   3. Plug video_url into hls.js → video plays.
 
 ================================================================================
 2.  ENDPOINTS
 ================================================================================
 
-  2.1  GET /api/stream  —  Get a video stream URL
-  ─────────────────────────────────────────────────────────────────────────────
+2.1  GET /api/stream  —  Get a video stream URL
+─────────────────────────────────────────────────────────────────────────────────
 
-    This is the main endpoint. Returns a direct HLS video URL.
+    The primary endpoint. Returns a direct HLS (.m3u8) or MP4 video URL.
 
-    PARAMETERS (all query-string):
+    PARAMETERS (query string):
 
-      anime_id  (integer, required, min=1)
-          AniList numeric ID. Examples:
-            16498  →  Attack on Titan
-            1535   →  Death Note
-            21     →  One Piece
-            101922 →  Demon Slayer
-          Get these from /api/search or directly from AniList.
+      anime_id  (integer, required)
+          AniList numeric ID.
+          Examples: 1535 (Death Note), 21 (One Piece), 16498 (AoT)
 
-      episode   (integer, required, min=1)
+      episode   (integer, required)
           Episode number (1-indexed).
 
       dub       (boolean, optional, default=false)
-          Set to "true" to prefer the dubbed version.
+          Set to "true" for dubbed version.
 
-      quality   (string, optional)
-          Preferred resolution: "360p", "480p", "720p", "1080p".
+      provider  (string, optional)
+          Force a specific Miruro pipe provider (e.g., "ally", "pewe").
+          Comma-separated for priority list: "pewe,ally".
+          Leave empty for default order (ally → pewe).
 
-    EXAMPLE REQUEST:
+      source    (string, optional)
+          Force a specific backend source: "miruro", "reanime", "playwright".
+          Default: auto (miruro pipe → playwright fallback).
+
+    EXAMPLES:
 
       curl "https://api.aniheist.com/api/stream?anime_id=1535&episode=1"
+      curl "https://api.aniheist.com/api/stream?anime_id=1535&episode=1&provider=pewe"
+      curl "https://api.aniheist.com/api/stream?anime_id=1535&episode=1&source=reanime"
 
     SUCCESS RESPONSE (HTTP 200):
 
       {
         "status": "success",
         "data": {
-          "video_url": "https://cdn.example.com/path/to/playlist.m3u8",
+          "video_url": "https://repackager.wixmp.com/video.wixstatic.com/.../master.m3u8",
           "format": "hls",
-          "source": "miruro",
-          "subtitles": [
-            {
-              "lang": "en",
-              "label": "English",
-              "url": "https://subs.example.com/en.vtt"
-            }
-          ],
+          "source": "miruro/ally",
+          "subtitles": [],
           "thumbnails": null,
           "headers": {
-            "Referer": "https://www.miruro.to/",
-            "Origin": "https://www.miruro.to"
+            "Referer": "https://allmanga.to/",
+            "Origin": "https://allmanga.to"
           },
           "fallback_used": false,
           "fallback_attempts": []
         },
         "meta": {
-          "response_time_ms": 15420,
+          "response_time_ms": 248.7,
           "cached": false
         }
       }
 
-      video_url   — Direct .m3u8 (HLS) or .mp4 URL. This is the stream.
-      format      — "hls", "mp4", or "dash".
-      subtitles   — Array of subtitle tracks (VTT format). Empty if none.
-      headers     — Some CDNs require these Referer/Origin headers to serve
-                    video segments. Your player or fetch should include them.
-      fallback_used — True if the primary source failed and a backup was used.
-      response_time_ms — How long the server took to find the stream.
+    FIELD NOTES:
+
+      video_url — Direct HLS (.m3u8) or MP4 URL. Plug into hls.js / Video.js.
+                  Streams are typically valid for 1-2 hours.
+
+      format    — "hls" (primary) or "mp4" (fallback). Use for player source type.
+
+      source    — Which provider chain served this:
+                    miruro/ally  → wixmp.com CDN (AWS CloudFront, working ✓)
+                    miruro/pewe  → anidb.app CDN (working ✓)
+                    miruro/bonk  → vibeplayer.site (blocked from VPS)
+                    miruro/kiwi  → uwucdn.top (Cloudflare-blocked)
+                    miruro/bee   → nekostream.site (Cloudflare-blocked)
+                    miruro/moo   → animegg.org (Cloudflare-blocked)
+                    miruro/hop   → (unknown, blocked)
+
+      headers   — Some CDNs require these Referer/Origin headers to serve
+                  video segments. If your browser blocks the stream, proxy
+                  segments through /api/proxy/hls (see section 2.9).
+
+      subtitles — Always empty for Miruro pipe (subs are hard-coded into
+                  the video). ReAnime provides VTT tracks but is currently
+                  Cloudflare-blocked from our VPS.
+
+      Fallback chain (automatic):
+        1. Miruro pipe (ally → pewe) with proxy pool retry on 403
+        2. Miruro Playwright (headless browser, last resort)
+
+      Server selection (manual):
+        Add ?provider=pewe to try a specific Miruro provider.
+        Add ?source=reanime to try ReAnime (likely Cloudflare-blocked).
+        See /api/anime/{id}/providers for available options.
 
     ERROR RESPONSES:
 
-      404  —  Anime not found (wrong anime_id)
-      422  —  Invalid parameters (missing episode, etc.)
-      502  —  All sources failed (source site is down)
-      504  —  Source timed out (too slow to respond)
+      404  —  { "status":"error", "error":{"code":"ANIME_NOT_FOUND",...} }
+             Anime ID not found on any provider.
 
-      Error JSON shape:
-      {
-        "status": "error",
-        "error": {
-          "code": "ALL_SOURCES_FAILED",
-          "message": "Could not retrieve stream from any source",
-          "details": {}
-        }
-      }
+      422  —  { "status":"error", "error":{"code":"VALIDATION_ERROR",...} }
+             Missing or invalid parameters.
 
-  2.2  GET /api/search  —  Search for anime
-  ─────────────────────────────────────────────────────────────────────────────
+      502  —  { "status":"error", "error":{"code":"ALL_SOURCES_FAILED",...} }
+             All provider sources failed.
 
-    Search across sources by title. Returns a list of anime with their IDs.
+      504  —  { "status":"error", "error":{"code":"SOURCE_TIMEOUT",...} }
+             Sources timed out.
+
+      429  —  { "status":"error", "error":{"code":"RATE_LIMIT_EXCEEDED",...} }
+             Rate limited.
+
+================================================================================
+
+2.2  GET /api/search  —  Search for anime
+─────────────────────────────────────────────────────────────────────────────────
 
     PARAMETERS:
 
       q  (string, required, min=2 chars)
-          The search query.
 
     EXAMPLE:
 
@@ -146,44 +193,33 @@ ARCHITECTURE:
         "status": "success",
         "data": [
           {
-            "id": "101922",
+            "id": 101922,
             "title": "Demon Slayer: Kimetsu no Yaiba",
-            "source": "miruro"
-          },
-          ...
+            "cover_image": "https://img.anili.st/media/101922",
+            "episodes": 26,
+            "format": "TV",
+            "score": 86,
+            "year": 2019,
+            "status": "FINISHED",
+            "genres": ["Action", "Supernatural"],
+            "description": "It is the Taisho Era in Japan..."
+          }
         ],
         "meta": {
           "query": "demon slayer",
           "count": 15,
-          "response_time_ms": 3200
+          "response_time_ms": 320
         }
       }
 
-      Use the `id` field from search results as the `anime_id` parameter
-      in /api/stream.
+    Use the `id` field from results as `anime_id` in /api/stream.
 
-  2.3  GET /api/health  —  Source health check
-  ─────────────────────────────────────────────────────────────────────────────
+================================================================================
 
-    Returns the operational status of all sources.
+2.3  GET /api/anime/{id}  —  Full anime metadata
+─────────────────────────────────────────────────────────────────────────────────
 
-    RESPONSE:
-
-      {
-        "status": "ok",
-        "version": "1.0.0",
-        "sources": {
-          "miruro": { "healthy": true }
-        },
-        "fallback_manager": { ... },
-        "cache_enabled": true
-      }
-
-  2.4  GET /api/anime/{id}  —  Full anime metadata (proxy to AniList)
-  ─────────────────────────────────────────────────────────────────────────────
-
-    Returns complete metadata for an anime: title, description, cover image,
-    genres, episodes, score, season, studio, trailer link, etc.
+    Proxies AniList GraphQL. Returns everything for an anime detail page.
 
     EXAMPLE:
 
@@ -222,12 +258,10 @@ ARCHITECTURE:
         "meta": {"response_time_ms": 320}
       }
 
-    Use this to populate the anime detail page in your frontend.
+================================================================================
 
-  2.5  GET /api/anime/{id}/episodes  —  Episode list
-  ─────────────────────────────────────────────────────────────────────────────
-
-    Returns the episode list for an anime.
+2.4  GET /api/anime/{id}/episodes  —  Episode list
+─────────────────────────────────────────────────────────────────────────────────
 
     EXAMPLE:
 
@@ -251,10 +285,12 @@ ARCHITECTURE:
         "meta": {"response_time_ms": 180}
       }
 
-  2.6  GET /api/trending  —  Trending anime
-  ─────────────────────────────────────────────────────────────────────────────
+    For airing anime, `next_airing` will contain `{episode, airingAt}`.
 
-    Returns currently trending anime (sorted by trend score on AniList).
+================================================================================
+
+2.5  GET /api/trending  —  Trending anime
+─────────────────────────────────────────────────────────────────────────────────
 
     PARAMETERS:
 
@@ -281,188 +317,201 @@ ARCHITECTURE:
             "genres": ["Action", "Drama", "Fantasy"],
             "status": "FINISHED",
             "description": "Several hundred years ago..."
-          },
-          ...
+          }
         ],
         "meta": {"page": 1, "count": 10, "response_time_ms": 450}
       }
 
-    Great for building a "Trending Now" carousel on your homepage.
+    Use for "Trending Now" carousels on the homepage.
 
-  2.7  GET /api/popular  —  All-time popular anime
-  ─────────────────────────────────────────────────────────────────────────────
+================================================================================
 
-    Same format as /api/trending but sorted by all-time popularity.
+2.6  GET /api/popular  —  All-time popular anime
+─────────────────────────────────────────────────────────────────────────────────
+
+    Same format as /api/trending, sorted by all-time popularity on AniList.
 
     EXAMPLE:
 
       curl "https://api.aniheist.com/api/popular?per_page=30"
 
-  2.8  POST /api/fallback/reset  —  Reset circuit breaker (admin)
-  ─────────────────────────────────────────────────────────────────────────────
+================================================================================
 
-    If a source has been flagged as "dead" by the circuit breaker, you can
-    reset it with this endpoint.
+2.7  GET /api/health  —  API health status
+─────────────────────────────────────────────────────────────────────────────────
+
+    RESPONSE:
+
+      {
+        "status": "degraded",
+        "version": "1.0.0",
+        "sources": {
+          "unified": {"healthy": false}
+        },
+        "fallback_manager": { ... },
+        "cache_enabled": true
+      }
+
+    "degraded" is normal (Redis shows degraded when the health check endpoint
+    can't reach Redis). The API still works fully.
+
+================================================================================
+
+2.8  GET /api/proxy/status  —  Proxy pool status
+─────────────────────────────────────────────────────────────────────────────────
+
+    Shows configured proxy sources. The pool automatically loads free HTTP/
+    SOCKS4/SOCKS5 proxies from TheSpeedX/PROXY-List (updated daily, ~7000+
+    proxies on startup).
+
+    RESPONSE:
+
+      {
+        "brightdata_configured": false,
+        "proxy_list_size": 0,
+        "proxy_pool_nodes": 348,
+        "active_proxy": "http://103.149.162.194:80",
+        "speedx_enabled": true,
+        "speedx_sources": {
+          "http": 132,
+          "socks4": 97,
+          "socks5": 119
+        }
+      }
+
+    The proxy pool is used during stream resolution to bypass CDN blocks:
+    when a CDN returns 403, the API retries through a proxy from the pool
+    before skipping that provider.
+
+    Auto-refresh: The pool tracks consecutive failures. After 10 failures,
+    it automatically fetches fresh proxies from TheSpeedX/PROXY-List. Also
+    refreshes after 10 minutes of inactivity with failures.
+
+    Free datacenter proxies often can't bypass Cloudflare — for reliable
+    Cloudflare bypass, configure BrightData (see .env.example).
+
+================================================================================
+
+2.9  GET /api/proxy/hls  —  HLS segment proxy
+─────────────────────────────────────────────────────────────────────────────────
+
+    When a CDN blocks browser requests (missing Referer/Origin, CORS issues),
+    proxy the HLS playlist through this endpoint. It fetches the stream with
+    proper headers and rewrites all segment URLs to also go through the proxy.
 
     PARAMETERS:
 
-      source  (string, optional)
-          Name of the source to reset. Omit to reset all.
+      url      (string, required) — The HLS .m3u8 URL
+      referer  (string, optional) — Referer header (default: miruro.tv)
+      origin   (string, optional) — Origin header (default: miruro.tv)
 
     EXAMPLE:
 
-      curl -X POST "https://api.aniheist.com/api/fallback/reset?source=miruro"
+      const streamResp = await fetch(
+        "https://api.aniheist.com/api/stream?anime_id=1535&episode=1"
+      );
+      const stream = (await streamResp.json()).data;
+      
+      // Instead of using the direct URL, proxy it:
+      const proxyUrl = "https://api.aniheist.com/api/proxy/hls?url=" +
+        encodeURIComponent(stream.video_url) +
+        "&referer=" + encodeURIComponent(stream.headers.Referer) +
+        "&origin=" + encodeURIComponent(stream.headers.Origin);
+      
+      // Use proxyUrl in hls.js
+      const hls = new Hls();
+      hls.loadSource(proxyUrl);
+
+    The endpoint fetches the .m3u8, rewrites all segment URLs to go through
+    itself (with proper headers), and returns the modified playlist. This
+    ensures every segment request includes the required Referer/Origin headers.
 
 ================================================================================
-3.  RATE LIMITING
-================================================================================
 
-  The API is rate-limited per IP address.
+2.10  GET /api/anime/{id}/providers  —  List available streaming providers
+─────────────────────────────────────────────────────────────────────────────────
 
-    Endpoint              Limit
-    ───────────────────────────────
-    /api/stream           30 requests per minute per IP
-    /api/search           60 requests per minute per IP
-    /api/health           No limit
+    Shows which Miruro pipe providers have episodes for a given anime.
+    Use this to let users choose their preferred server.
 
-  If you exceed the limit, the API returns HTTP 429 with:
+    EXAMPLE:
 
-    {
-      "status": "error",
-      "error": {
-        "code": "RATE_LIMIT_EXCEEDED",
-        "message": "Rate limit exceeded. 30 per 1 minute"
+      curl "https://api.aniheist.com/api/anime/1535/providers"
+
+    RESPONSE:
+
+      {
+        "status": "success",
+        "data": {
+          "anime_id": 1535,
+          "providers": [
+            {
+              "name": "ally",
+              "title": "",
+              "episodes": {"sub": 37, "dub": 37}
+            },
+            {
+              "name": "pewe",
+              "title": "",
+              "episodes": {"sub": 37, "dub": 37}
+            }
+          ]
+        },
+        "meta": {"response_time_ms": 320}
       }
-    }
 
-  Rate limit info is also returned in response headers:
-    X-RateLimit-Limit
-    X-RateLimit-Remaining
-    X-RateLimit-Reset
+    Provider names from this list can be passed as the `provider` parameter
+    to /api/stream for server selection.
+
+    Working providers (from VPS): ally (wixmp.com), pewe (anidb.app)
+    Blocked providers (Cloudflare): bonk, kiwi, bee, moo, hop
 
 ================================================================================
-4.  FRONTEND INTEGRATION
+3.  FRONTEND INTEGRATION
 ================================================================================
 
-  4.1  Video Player Setup
-  ─────────────────────────────────────────────────────────────────────────────
+3.1  hls.js Integration (Recommended)
+─────────────────────────────────────────────────────────────────────────────────
 
-  The API returns HLS (.m3u8) URLs. For browser playback you need a player
-  that supports HLS. The two best options:
-
-    A)  hls.js  (lightweight, no UI — you provide controls)
-        https://github.com/video-dev/hls.js/
-
-    B)  Video.js  (full-featured, includes UI)
-        https://videojs.com/
-
-  4.2  Full Integration Example (HTML + JavaScript)
-  ─────────────────────────────────────────────────────────────────────────────
-
-  (A) Using hls.js (recommended — smaller, faster):
-
-    <!DOCTYPE html>
-    <html>
-    <head>
-      <script src="https://cdn.jsdelivr.net/npm/hls.js@latest"></script>
-      <style>
-        video { width: 100%; max-width: 960px; display: block; }
-        .error { color: red; padding: 20px; }
-        .loading { padding: 20px; color: #666; }
-      </style>
-    </head>
-    <body>
-
-      <div id="player-container">
-        <div class="loading" id="loading">Loading stream…</div>
-        <video id="video" controls autoplay style="display:none"></video>
-      </div>
-
-      <script>
-        const ANIHEIST_API = "https://api.aniheist.com";
-
-        async function loadEpisode(animeId, episode) {
-          const loading = document.getElementById("loading");
-          const video = document.getElementById("video");
-          loading.style.display = "block";
-          video.style.display = "none";
-
-          try {
-            // Step 1: Fetch the stream URL from the API
-            const resp = await fetch(
-              `${ANIHEIST_API}/api/stream?anime_id=${animeId}&episode=${episode}`
-            );
-            const data = await resp.json();
-
-            if (data.status !== "success") {
-              throw new Error(data.error?.message || "Unknown error");
-            }
-
-            const stream = data.data;
-
-            // Step 2: Initialize hls.js with the video URL
-            if (Hls.isSupported()) {
-              const hls = new Hls();
-
-              // Some CDNs require the Referer header.
-              // If you control your backend, proxy the stream through it.
-              // Otherwise HLS.js handles most CDNs without extra headers.
-
-              hls.loadSource(stream.video_url);
-              hls.attachMedia(video);
-              hls.on(Hls.Events.MANIFEST_PARSED, () => {
-                video.play();
-              });
-
-            } else if (video.canPlayType("application/vnd.apple.mpegurl")) {
-              // Safari native HLS support
-              video.src = stream.video_url;
-              video.addEventListener("loadedmetadata", () => video.play());
-            }
-
-            // Step 3: Add subtitles if available
-            if (stream.subtitles && stream.subtitles.length > 0) {
-              stream.subtitles.forEach((sub) => {
-                const track = document.createElement("track");
-                track.kind = "subtitles";
-                track.label = sub.label;
-                track.srclang = sub.lang;
-                track.src = sub.url;
-                video.appendChild(track);
-              });
-            }
-
-            loading.style.display = "none";
-            video.style.display = "block";
-
-          } catch (err) {
-            loading.textContent = "Failed to load: " + err.message;
-            loading.className = "error";
-          }
-        }
-
-        // Example: Load Death Note episode 1
-        loadEpisode(1535, 1);
-      </script>
-
-    </body>
-    </html>
-
-  (B) Using Video.js:
-
-    <!-- Include Video.js CSS and JS -->
-    <link href="https://vjs.zencdn.net/8.10.0/video-js.css" rel="stylesheet">
-    <script src="https://vjs.zencdn.net/8.10.0/video.min.js"></script>
-
-    <video id="player" class="video-js vjs-default-skin" controls>
-      <p class="vjs-no-js">Your browser does not support video.</p>
-    </video>
+    <script src="https://cdn.jsdelivr.net/npm/hls.js@latest"></script>
+    <video id="video" controls autoplay style="width:100%;max-width:960px"></video>
 
     <script>
+      const API = "https://api.aniheist.com";
+
       async function playEpisode(animeId, episode) {
-        const resp = await fetch(
-          `https://api.aniheist.com/api/stream?anime_id=${animeId}&episode=${episode}`
-        );
+        const resp = await fetch(`${API}/api/stream?anime_id=${animeId}&episode=${episode}`);
+        const data = await resp.json();
+        if (data.status !== "success") throw new Error(data.error?.message);
+        
+        const stream = data.data;
+        const video = document.getElementById("video");
+
+        if (Hls.isSupported()) {
+          const hls = new Hls();
+          hls.loadSource(stream.video_url);
+          hls.attachMedia(video);
+          hls.on(Hls.Events.MANIFEST_PARSED, () => video.play());
+        } else if (video.canPlayType("application/vnd.apple.mpegurl")) {
+          video.src = stream.video_url;
+        }
+      }
+
+      playEpisode(1535, 1);
+    </script>
+
+3.2  Video.js Integration
+─────────────────────────────────────────────────────────────────────────────────
+
+    <link href="https://vjs.zencdn.net/8.10.0/video-js.css" rel="stylesheet">
+    <script src="https://vjs.zencdn.net/8.10.0/video.min.js"></script>
+    <video id="player" class="video-js vjs-default-skin" controls></video>
+
+    <script>
+      const API = "https://api.aniheist.com";
+
+      async function playEpisode(animeId, episode) {
+        const resp = await fetch(`${API}/api/stream?anime_id=${animeId}&episode=${episode}`);
         const data = await resp.json();
         if (data.status !== "success") return;
 
@@ -473,314 +522,212 @@ ARCHITECTURE:
           src: stream.video_url,
           type: stream.format === "mp4" ? "video/mp4" : "application/x-mpegURL"
         });
-
-        // Add subtitles
-        if (stream.subtitles) {
-          stream.subtitles.forEach((sub) => {
-            player.addRemoteTextTrack({
-              kind: "subtitles",
-              label: sub.label,
-              language: sub.lang,
-              src: sub.url
-            }, false);
-          });
-        }
-
         player.play();
       }
     </script>
 
-  4.3  Using AniList Directly (recommended for metadata)
-  ─────────────────────────────────────────────────────────────────────────────
+3.3  React / Next.js Integration
+─────────────────────────────────────────────────────────────────────────────────
 
-    For all metadata (search, anime info, episodes list, genres, covers, etc.),
-    the cleanest approach is to call AniList's GraphQL API directly from the
-    browser. No API key needed, no CORS issues, and no rate limits that affect
-    a normal frontend.
+    // api.js — API client
+    const API = "https://api.aniheist.com";
 
-    ANILIST GRAPHQL ENDPOINT:  https://graphql.anilist.co
-    METHOD: POST
-    CONTENT-TYPE: application/json
-    BODY: { "query": "GRAPHQL_QUERY", "variables": {...} }
+    export async function fetchStream(animeId, episode, provider) {
+      let url = `${API}/api/stream?anime_id=${animeId}&episode=${episode}`;
+      if (provider) url += `&provider=${provider}`;
+      const res = await fetch(url);
+      const data = await res.json();
+      if (data.status !== "success") throw new Error(data.error?.message);
+      return data.data;
+    }
 
-    Below are ready-to-use queries:
+    export async function fetchProviders(animeId) {
+      const res = await fetch(`${API}/api/anime/${animeId}/providers`);
+      const data = await res.json();
+      return data.status === "success" ? data.data.providers : [];
+    }
 
-    (A) Anime metadata (info page):
+    export async function searchAnime(query) {
+      const res = await fetch(`${API}/api/search?q=${encodeURIComponent(query)}`);
+      const data = await res.json();
+      return data.status === "success" ? data.data : [];
+    }
 
-      const METADATA_QUERY = `
-        query ($id: Int) {
-          Media(id: $id, type: ANIME) {
-            id
-            title { romaji english native }
-            description
-            coverImage { large color }
-            bannerImage
-            genres
-            episodes
-            duration
-            status
-            season
-            seasonYear
-            averageScore
-            format
-            studios { nodes { name } }
-            startDate { year month day }
-            nextAiringEpisode { episode airingAt }
-            trailer { site id }
-            tags { name rank }
-          }
-        }
-      `;
+    export async function getAnime(id) {
+      const res = await fetch(`${API}/api/anime/${id}`);
+      const data = await res.json();
+      return data.status === "success" ? data.data : null;
+    }
 
-      const resp = await fetch("https://graphql.anilist.co", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ query: METADATA_QUERY, variables: { id: 1535 } })
-      });
-      const anime = (await resp.json()).data.Media;
+    // VideoPlayer.jsx
+    import React, { useEffect, useRef } from "react";
+    import Hls from "hls.js";
+    import { fetchStream } from "./api";
 
-    (B) Search:
+    export default function VideoPlayer({ animeId, episode }) {
+      const videoRef = useRef(null);
 
-      const SEARCH_QUERY = `
-        query ($search: String) {
-          Page(page: 1, perPage: 25) {
-            media(search: $search, type: ANIME) {
-              id
-              title { romaji english }
-              coverImage { large }
-              episodes
-              format
-              averageScore
-              seasonYear
-              status
+      useEffect(() => {
+        let hls;
+        (async () => {
+          try {
+            const stream = await fetchStream(animeId, episode);
+            const video = videoRef.current;
+            
+            if (Hls.isSupported()) {
+              hls = new Hls();
+              hls.loadSource(stream.video_url);
+              hls.attachMedia(video);
+              hls.on(Hls.Events.MANIFEST_PARSED, () => video.play());
             }
+          } catch (err) {
+            console.error("Stream failed", err);
           }
+        })();
+        return () => hls?.destroy();
+      }, [animeId, episode]);
+
+      return <video ref={videoRef} controls style={{ width: "100%" }} />;
+    }
+
+    // ServerSelector.jsx — Let users pick providers
+    import React, { useEffect, useState } from "react";
+    import { fetchStream, fetchProviders } from "./api";
+
+    export default function ServerSelector({ animeId, episode, onStreamReady }) {
+      const [providers, setProviders] = useState([]);
+      const [selected, setSelected] = useState("");
+      const [loading, setLoading] = useState(false);
+      const [error, setError] = useState("");
+
+      useEffect(() => {
+        fetchProviders(animeId).then(setProviders).catch(() => {});
+      }, [animeId]);
+
+      async function handlePlay() {
+        setLoading(true);
+        setError("");
+        try {
+          const stream = await fetchStream(animeId, episode, selected);
+          onStreamReady(stream);
+        } catch (err) {
+          setError(err.message);
         }
-      `;
+        setLoading(false);
+      }
 
-      fetch("https://graphql.anilist.co", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ query: SEARCH_QUERY, variables: { search: "naruto" } })
-      });
+      return (
+        <div>
+          <select value={selected} onChange={e => setSelected(e.target.value)}>
+            <option value="">Auto (recommended)</option>
+            {providers.map(p => (
+              <option key={p.name} value={p.name}>
+                {p.name} ({p.episodes.sub} ep)
+              </option>
+            ))}
+          </select>
+          <button onClick={handlePlay} disabled={loading}>
+            {loading ? "Loading..." : "Play"}
+          </button>
+          {error && <p style={{color:"red"}}>{error}</p>}
+        </div>
+      );
+    }
 
-    (C) Trending / Popular:
+3.4  Error Handling & UI States
+─────────────────────────────────────────────────────────────────────────────────
 
-      const LIST_QUERY = `
-        query ($page: Int) {
-          Page(page: $page, perPage: 20) {
-            media(sort: TRENDING_DESC, type: ANIME) {
-              id
-              title { romaji english }
-              coverImage { large }
-              episodes
-              format
-              averageScore
-              seasonYear
-              genres
-              status
-            }
-          }
-        }
-      `;
+    Your frontend should handle these states:
 
-      // For all-time popular, use: sort: POPULARITY_DESC
+    LOADING:
+      Show a spinner while fetchStream() is in flight.
 
-    Your API (api.aniheist.com) also proxies these same endpoints if you
-    prefer a unified API (see /api/anime/{id}, /api/trending, /api/popular).
+    SUCCESS:
+      video_url is available → pass to hls.js.
+      Some CDNs may take 5-10s to start serving segments (especially for
+      first-load). Show a "buffering" indicator during this time.
 
-  4.4  Important Notes About Video Playback
-  ─────────────────────────────────────────────────────────────────────────────
+    ERROR:
+      - ANIME_NOT_FOUND (404): The AniList ID doesn't exist or isn't on
+        any provider. Show "Anime not available."
+      - ALL_SOURCES_FAILED (502): All providers failed. Show "Temporarily
+        unavailable, try again later."
+      - RATE_LIMIT_EXCEEDED (429): Too many requests. Show a cooldown
+        message and retry after 2 seconds.
+      - VALIDATION_ERROR (422): Bad parameters. This is a frontend bug.
 
-    • HLS (.m3u8) is the primary format. All modern browsers support it via
-      hls.js or native HLS (Safari).
-
-    • Some CDNs check the Referer header. If the video doesn't play, the
-      simplest solution is to proxy the .m3u8 through your own backend
-      (adds bandwidth cost but guarantees playback).
-
-    • CORS: The HLS streams may not set CORS headers. If you host your
-      frontend on a different domain, you may need a CORS proxy or use
-      the `crossorigin` attribute on the video element.
-
-    • Stream URLs expire after 1-2 hours. The API caches them for 10 minutes.
-      After that, a new request will fetch a fresh URL.
+    NETWORK OFFLINE:
+      If fetch() itself fails, show a network error state.
 
 ================================================================================
-5.  EXAMPLE WORKFLOW
+4.  RATE LIMITING
 ================================================================================
 
-  Typical frontend flow:
+    Per-IP limits:
 
-    1. User searches for an anime:
-       GET /api/search?q=naruto
+      Endpoint              Limit
+      ───────────────────────────────
+      /api/stream           30 req/min
+      /api/search           60 req/min
+      /api/health           No limit
+      /api/anime/{id}       60 req/min
+      /api/trending         60 req/min
+      /api/popular          60 req/min
 
-    2. User selects an anime and episode from search results:
-       GET /api/stream?anime_id=1535&episode=1
+    Rate limit info in response headers:
+      X-RateLimit-Limit
+      X-RateLimit-Remaining
+      X-RateLimit-Reset (Unix timestamp)
 
-    3. Frontend receives the .m3u8 URL and passes it to hls.js / Video.js
-
-    4. The video plays directly from the CDN. The API is NOT in the
-       video path — the browser connects directly to the CDN.
-
-  No authentication required. No API key needed.
+    On 429:
+      - Stop making requests for 2-3 seconds
+      - Cache stream URLs client-side (they're valid for 10 min anyway)
+      - Avoid polling — fetch on user action only
 
 ================================================================================
-6.  PERFORMANCE & LIMITS
+5.  PERFORMANCE
 ================================================================================
 
-    Metric                    Value
+    Metric                    Typical
     ─────────────────────────────────────────────
-    Stream latency (first)    ~2-5 seconds (Worker + provider scraping)
-    Cached stream latency     < 100ms
-    Cache duration            10 minutes
-    Rate limit /api/stream    30 req/min/IP
-    Rate limit /api/search    60 req/min/IP
-    Total request timeout     90 seconds
-    Anivexa Worker providers  7 (anikoto, reanime, animepahe, allmanga, animegg, anineko, anidbapp)
-    Miruro pipe providers     7 (kiwi, bee, ally, pewe, moo, hop, bonk)
-    Browser dependency        None
+    /api/stream response      200ms - 1.5s (uncached)
+    /api/stream (cached)      < 50ms
+    /api/search               300ms - 800ms
+    /api/anime/{id}           200ms - 500ms
+    /api/trending             300ms - 600ms
+    Stream cache TTL          10 minutes
+    Metadata cache TTL        60 minutes
 
-  Priority: Anivexa Worker (Cloudflare Edge) → Miruro Pipe → Playwright
-
-  Caching:
-    • Successful stream results are cached in Redis for 10 minutes.
-    • Subsequent requests for the same anime+episode return instantly.
-    • Metadata and search results are cached for 5-60 minutes depending on type.
+    Caching:
+      - Redis caches stream URLs for 10 minutes
+      - Repeated requests for the same anime+episode return instantly
+      - The cache key includes anime_id + episode + sub/dub
 
 ================================================================================
-7.  SOURCE ARCHITECTURE
+6.  TROUBLESHOOTING
 ================================================================================
 
-  PRIMARY: Anivexa Worker (Cloudflare Edge)
-    └─ Deployed as a Cloudflare Worker: https://anivexa-api.zenxhamza.workers.dev
-    └─ Runs on Cloudflare's edge network (bypasses provider IP blocks)
-    └─ 7 providers with full scraping logic:
-         1. anikoto (Solaris)     — 1080p HLS, hard-subbed English
-         2. reanime (Orion)       — HLS + English subtitle tracks (VTT/SRT)
-         3. animepahe (Astra)     — HLS
-         4. allmanga (Titan)      — MP4
-         5. animegg              — HLS
-         6. anineko (Lynx)       — HLS
-         7. anidbapp (Nexus)     — HLS
+    VIDEO WON'T PLAY:
+      → Use hls.js, not a native <video> tag (browsers don't support HLS natively
+        except Safari)
+      → If using hls.js and getting CORS errors, proxy through /api/proxy/hls
+      → Some CDNs require Referer/Origin headers — /api/proxy/hls handles this
 
-  FALLBACK 1: Miruro Pipe API (https://www.miruro.tv/api/secure/pipe)
-    └─ Direct HTTP calls to Miruro's internal backend
-    └─ 7 providers: kiwi, bee, ally, pewe, moo, hop, bonk
-    └─ Hard-subbed English subtitles (burned into video)
+    429 RATE LIMITED:
+      → You're making too many requests from one IP
+      → Cache responses client-side (stream URLs are valid for 10 min)
+      → Add a 500ms debounce on search input
 
-  FALLBACK 2: ReAnime-API (local Python + Node.js)
-    └─ Scrapes reanime.to + decrypts flixcloud.cc streams
-    └─ Returns English subtitles as separate files
-    └─ WASM-based AES-256-CBC decryption for HLS URLs
+    API RETURNS 502:
+      → All provider sources are temporarily down
+      → Check /api/health, try again in a minute
+      → The circuit breaker will auto-retry after 60s cooldown
 
-  LAST RESORT: Playwright browser
-    └─ Full Chromium browser with network interception
-    └─ ~15-20 second response time (slow)
+    EMPTY SUBTITLES:
+      → Most Miruro pipe providers have hard-coded subtitles (burned into video)
+      → Only ReAnime provides separate VTT subtitle tracks
+      → This is normal — the video will still have English subs
 
 ================================================================================
-8.  API RESPONSE QUICK REFERENCE
-================================================================================
-
-  /api/stream
-    SUCCESS: HTTP 200
-    {
-      "status": "success",
-      "data": {
-        "video_url": "https://…/playlist.m3u8",
-        "format": "hls",
-        "source": "miruro",
-        "subtitles": [{"lang":"en","label":"English","url":"https://…"}],
-        "thumbnails": null,
-        "headers": {"Referer":"https://www.miruro.to/"},
-        "fallback_used": false,
-        "fallback_attempts": []
-      },
-      "meta": {"response_time_ms": 15420, "cached": false}
-    }
-
-    ERROR 404:  { "status":"error", "error":{"code":"ANIME_NOT_FOUND",...} }
-    ERROR 422:  { "status":"error", "error":{"code":"VALIDATION_ERROR",...} }
-    ERROR 502:  { "status":"error", "error":{"code":"ALL_SOURCES_FAILED",...} }
-    ERROR 504:  { "status":"error", "error":{"code":"SOURCE_TIMEOUT",...} }
-    ERROR 429:  { "status":"error", "error":{"code":"RATE_LIMIT_EXCEEDED",...} }
-
-  /api/search?q=naruto
-    SUCCESS: HTTP 200
-    {
-      "status": "success",
-      "data": [{"id":"1535","title":"Death Note","score":86,...}, ...],
-      "meta": {"query":"naruto","count":25,"response_time_ms":450}
-    }
-
-  /api/anime/{id}
-    SUCCESS: HTTP 200
-    {
-      "status": "success",
-      "data": {
-        "anilist_id": 1535,
-        "title": {"romaji":"Death Note","english":"Death Note","native":"デスノート"},
-        "description": "...",
-        "cover_image": "https://img.anili.st/media/1535",
-        "genres": ["Mystery","Psychological","Supernatural","Thriller"],
-        "episodes": 37,
-        "score": 86,
-        ...
-      },
-      "meta": {"response_time_ms": 320}
-    }
-
-  /api/anime/{id}/episodes
-    SUCCESS: HTTP 200
-    {
-      "status": "success",
-      "data": {"id":1535,"total":37,"episodes":[{"number":1,...}],...},
-      "meta": {"response_time_ms": 180}
-    }
-
-  /api/trending
-    SUCCESS: HTTP 200
-    {
-      "status": "success",
-      "data": [{"id":16498,"title":"Attack on Titan",...}],
-      "meta": {"page":1,"count":20,"response_time_ms":400}
-    }
-
-  /api/popular
-    SUCCESS: HTTP 200
-    Same format as /api/trending, sorted by all-time popularity.
-
-  /api/health
-    SUCCESS: HTTP 200
-    {
-      "status": "ok",
-      "version": "1.0.0",
-      "sources": {"miruro":{"healthy":true}},
-      "fallback_manager": {...},
-      "cache_enabled": true
-    }
-
-================================================================================
-9.  TROUBLESHOOTING
-================================================================================
-
-  Problem: API returns 502 ALL_SOURCES_FAILED
-    → Miruro might be down or blocked by Cloudflare
-    → Check /api/health to see if Miruro is healthy
-    → Try again in a few minutes
-
-  Problem: Video doesn't play in browser
-    → Make sure you're using hls.js or Video.js (not a native <video> tag)
-    → Check browser console for CORS errors
-    → Some CDNs block cross-origin requests — proxy the stream
-
-  Problem: API returns 429 RATE_LIMIT_EXCEEDED
-    → You're making more than 30 requests per minute from one IP
-    → Add client-side caching to avoid repeat requests
-    → Reduce polling frequency
-
-  Problem: Search returns 0 results
-    → The query might be too specific — try a broader term
-    → The source might be temporarily unavailable
-
+  END OF DOCUMENT
 ================================================================================

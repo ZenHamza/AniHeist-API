@@ -26,18 +26,17 @@
       B --> C[🎯 Miruro Pipe<br/>7 Providers]
       C --> D[✅ ally - wixmp.com]
       C --> E[✅ pewe - anidb.app]
-      C --> F[✅ bonk - vibeplayer.site]
-      C --> G[⛔ kiwi/bee/moo/hop]
-      B --> H[🔄 ReAnime API<br/>flixcloud.cc]
-      B --> I[🌍 Playwright<br/>Browser Fallback]
-      B --> J[🔒 Proxy Pool<br/>BrightData / Free]
+      C --> F[⛔ bonk/kiwi/bee/moo/hop]
+      B --> G[🔄 Proxy Pool<br/>300 SpeedX Proxies]
+      G --> F
+      B --> H[🔒 HLS Proxy<br/>Header Injection]
+      B --> I[📋 Provider Selector<br/>Choose Server]
       
       style A fill:#1a1a2e,stroke:#e94560,color:#fff
       style B fill:#16213e,stroke:#0f3460,color:#fff
       style D fill:#1b4332,stroke:#40916c,color:#fff
       style E fill:#1b4332,stroke:#40916c,color:#fff
-      style F fill:#1b4332,stroke:#40916c,color:#fff
-      style G fill:#4a0e0e,stroke:#e94560,color:#fff
+      style F fill:#4a0e0e,stroke:#e94560,color:#fff
   ```
   
 </div>
@@ -51,16 +50,16 @@
 <table>
 <tr>
 <td width="33%" align="center">
-  <h3>🎯 Triple-Core Engine</h3>
-  <p>Miruro pipe API with 7 providers, ReAnime fallback, Playwright browser automation — auto-failover with circuit breaker pattern.</p>
+  <h3>🎯 Dual-Core Engine</h3>
+  <p>Miruro pipe API with 7 built-in providers + proxy pool retry for blocked CDNs. Auto-failover with circuit breaker pattern.</p>
 </td>
 <td width="33%" align="center">
   <h3>🛡️ Proxy Infrastructure</h3>
-  <p>BrightData residential proxies, TheSpeedX free SOCKS pool, sing-box VPN tunnels (VLESS/VMess/Trojan/SS). Rotating pool with health checks.</p>
+  <p>300 free SpeedX proxies loaded on startup, auto-refresh on failure, rotating pool. BrightData/sing-box ready.</p>
 </td>
 <td width="33%" align="center">
-  <h3>⚡ Production Ready</h3>
-  <p>Redis caching, rate limiting, structured logging, Prometheus metrics, Docker Compose deployment, SSL via Let's Encrypt.</p>
+  <h3>🎮 Server Selection</h3>
+  <p>Users can pick specific providers (ally, pewe) or backend sources (miruro, reanime) via URL params. Provider listing endpoint included.</p>
 </td>
 </tr>
 </table>
@@ -92,6 +91,9 @@ https://api.aniheist.com
 | Method | Path | Description |
 |--------|------|-------------|
 | `GET` | `/api/stream?anime_id={id}&episode={n}` | Get stream URL (HLS/MP4) |
+| `GET` | `/api/stream?anime_id={id}&episode={n}&provider=pewe` | Get stream from specific provider |
+| `GET` | `/api/stream?anime_id={id}&episode={n}&source=reanime` | Get stream from specific source |
+| `GET` | `/api/anime/{id}/providers` | List available providers for anime |
 | `GET` | `/api/search?q={query}` | Search anime by title |
 | `GET` | `/api/anime/{id}` | Get anime details & episodes |
 | `GET` | `/api/trending` | Trending anime |
@@ -141,13 +143,13 @@ https://api.aniheist.com
 ### Source Priority Chain
 
 ```
-Miruro Pipe API (ally/pewe/bonk)  →  200ms - 1s
-        ↓ (fallback if no stream or CDN 403)
-ReAnime API (reanime.to)          →  1s - 3s
-        ↓ (fallback if API unreachable)
-Playwright Browser (miruro.to)    →  3s - 8s
-        ↓ (fallback if browser blocked)
-Proxy Pool (BrightData/Free)      →  Configurable
+Miruro Pipe API (ally → pewe)     →  200ms - 1s
+        ↓ (fallback if CDN 403, retry via proxy pool)
+Proxy Pool (300 SpeedX proxies)   →  Auto-refresh on failure
+        ↓ (fallback if no stream)
+Playwright Browser (miruro.to)    →  3s - 8s (last resort)
+        ↓ (only if explicitly requested, Cloudflare-blocked)
+ReAnime API (reanime.to)          →  Cloudflare-blocked
 ```
 
 <br/>
@@ -224,10 +226,11 @@ docker compose up -d --force-recreate api
 | Metric | Value |
 |--------|-------|
 | Avg response time | 200ms - 1s (cached: ~5ms) |
-| Cache TTL | 600s (stream), 3600s (metadata) |
+| Cache TTL | 600s (stream, per-provider), 3600s (metadata) |
 | Rate limit | 30 req/min per IP |
 | Circuit breaker | 5 failures → 60s cooldown |
-| Providers covered | 7 (3 working CDNs) |
+| Providers covered | 7 (2 confirmed working CDNs from VPS) |
+| Proxy pool | 300 SpeedX proxies (auto-refresh on failure) |
 | Anime coverage | ~10,000+ titles via AniList |
 
 <br/>

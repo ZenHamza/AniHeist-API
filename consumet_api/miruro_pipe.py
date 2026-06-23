@@ -12,6 +12,7 @@ import httpx
 from src.utils.logger import get_logger
 from src.models.stream import StreamResult, ParserError, AnimeNotFoundError
 from src.cache.redis_cache import get_cache
+from src.proxy_pool import ProxyPool
 
 log = get_logger(__name__)
 
@@ -31,10 +32,10 @@ async def _get_client() -> httpx.AsyncClient:
         _client = httpx.AsyncClient(timeout=15, headers=HEADERS)
     return _client
 
-# Provider priority order — working CDNs first, Cloudflare-blocked last
-# Working: ally (wixmp.com), pewe (anidb.app), bonk (vibeplayer.site)
-# Blocked: kiwi (uwucdn.top), bee (nekostream.site), moo (animegg.org), hop
-PROVIDER_ORDER = ["ally", "pewe", "bonk", "kiwi", "bee", "moo", "hop"]
+# Provider priority order — only confirmed working CDNs
+# Working: ally (wixmp.com — AWS CloudFront), pewe (anidb.app)
+# Blocked from VPS: bonk (vibeplayer.site), kiwi (uwucdn.top), bee (nekostream.site), moo (animegg.org), hop
+PROVIDER_ORDER = ["ally", "pewe"]
 
 
 def _encode(payload: dict) -> str:
@@ -70,8 +71,9 @@ class MiruroPipe:
     Provides episodes and stream URLs without Playwright.
     """
 
-    def __init__(self):
+    def __init__(self, proxy_pool: Optional[ProxyPool] = None):
         self._episode_cache: dict[int, dict] = {}
+        self._proxy_pool = proxy_pool
 
     async def get_episodes(self, anilist_id: int) -> dict:
         """Get episode data with provider info from Miruro pipe."""
@@ -184,20 +186,46 @@ class MiruroPipe:
                         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
                     }
                     # Quick CDN accessibility check — skip if blocked
+                    # Tries directly first, then via proxy pool if available
                     fmt = "hls" if best.get("type") == "hls" else "mp4"
+
+                    async def _check_cdn(proxy_url: Optional[str] = None) -> Optional[bool]:
+                        kwargs = {"headers": stream_headers, "follow_redirects": True, "timeout": 3}
+                        if proxy_url:
+                            async with httpx.AsyncClient(timeout=3, proxy=proxy_url) as c:
+                                head = await c.head(best["url"], **kwargs)
+                                return None if head.status_code in (403, 401, 451) else True
+                        else:
+                            c = await _get_client()
+                            head = await c.head(best["url"], **kwargs)
+                            return None if head.status_code in (403, 401, 451) else True
+
                     try:
-                        cdn_check = await _get_client()
-                        head = await cdn_check.head(best["url"], headers=stream_headers, follow_redirects=True, timeout=5)
-                        if head.status_code in (403, 401, 451):
-                            log.warning("CDN blocked, skipping provider", provider=pname, status=head.status_code)
-                            last_error = f"{pname}: CDN blocked ({head.status_code})"
-                            continue
+                        ok = await _check_cdn()
+                        if ok is None:
+                            log.warning("CDN blocked directly", provider=pname)
+                            # Try via proxy pool if available
+                            proxied = False
+                            if self._proxy_pool:
+                                pool = self._proxy_pool
+                                await pool.ensure_fresh()
+                                proxy_url = pool.get_proxy_url()
+                                if proxy_url:
+                                    ok2 = await _check_cdn(proxy_url=proxy_url)
+                                    if ok2:
+                                        log.info("CDN accessible via proxy", provider=pname, proxy=proxy_url[:40])
+                                        pool.mark_success()
+                                        proxied = True
+                                    else:
+                                        pool.mark_failure()
+                            if not proxied:
+                                last_error = f"{pname}: CDN blocked"
+                                continue
                     except (httpx.ConnectTimeout, httpx.ReadTimeout, httpx.ConnectError):
                         log.warning("CDN unreachable, skipping provider", provider=pname)
                         last_error = f"{pname}: CDN unreachable"
                         continue
                     except Exception:
-                        # If HEAD fails, still try — some CDNs reject HEAD but accept GET
                         pass
                     return StreamResult(
                         url=best["url"],

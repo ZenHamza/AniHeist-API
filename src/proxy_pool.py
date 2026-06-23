@@ -51,6 +51,9 @@ class ProxyPool:
         self.nodes: list[ProxyNode] = []
         self._index = 0
         self._lock = asyncio.Lock()
+        self._consecutive_failures = 0
+        self._last_refresh = 0.0
+        self._refresh_interval = 600  # 10 minutes
 
     async def load_from_config(self):
         """Load HTTP/SOCKS5 proxies from settings."""
@@ -238,6 +241,34 @@ class ProxyPool:
             }
         return None
 
+    async def ensure_fresh(self):
+        """Auto-refresh proxy pool if too many failures or stale."""
+        now = time.time()
+        if self._consecutive_failures >= 10:
+            log.info("Auto-refreshing proxy pool (too many failures)", failures=self._consecutive_failures)
+            await self.refresh()
+            self._consecutive_failures = 0
+            self._last_refresh = now
+        elif self._consecutive_failures >= 3 and (now - self._last_refresh) > self._refresh_interval:
+            log.info("Auto-refreshing proxy pool (stale + failures)", failures=self._consecutive_failures)
+            await self.refresh()
+            self._consecutive_failures = 0
+            self._last_refresh = now
+
+    async def refresh(self):
+        """Re-fetch all proxy sources, replacing existing nodes."""
+        self.nodes.clear()
+        self._index = 0
+        await self.load_from_config()
+        await self.load_from_speedx_list()
+        log.info("Proxy pool refreshed", nodes=len(self.nodes))
+
+    def mark_failure(self):
+        self._consecutive_failures += 1
+
+    def mark_success(self):
+        self._consecutive_failures = 0
+
     def get_proxy_url(self) -> Optional[str]:
         if not self.nodes:
             return settings.get_proxy() or None
@@ -304,7 +335,7 @@ async def get_proxy_pool() -> ProxyPool:
         pool = ProxyPool()
         await pool.load_from_config()
 
-        use_speedx = os.environ.get("USE_SPEEDX_PROXIES", "false").lower() == "true"
+        use_speedx = os.environ.get("USE_SPEEDX_PROXIES", "true").lower() == "true"
         if use_speedx:
             max_proxies = int(os.environ.get("SPEEDX_MAX_PER_TYPE", "100"))
             await pool.load_from_speedx_list(max_per_type=max_proxies)
