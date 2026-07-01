@@ -490,10 +490,8 @@ TABLE OF CONTENTS
 2.11  GET /api/newest  —  Newest TV anime releases
 ─────────────────────────────────────────────────────────────────────────────────
 
-    Miruro.tv homepage "NEWEST" section logic — all TV anime sorted by trending
-    (no status filter, format: TV — same as Miruro's approach).
-    Includes RELEASING, FINISHED, and NOT_YET_RELEASED entries.
-    Excludes ONA, OVA, Movie, and Special formats.
+    Newest TV anime sorted by release date (descending), only RELEASING or FINISHED.
+    Excludes NOT_YET_RELEASED, ONA, OVA, Movie, and Special formats.
     Same response format as /api/trending and /api/popular.
 
     PARAMETERS:
