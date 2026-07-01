@@ -34,10 +34,10 @@ async def _get_client() -> httpx.AsyncClient:
     return _client
 
 # Provider priority order — only confirmed working CDNs
-# Working directly from VPS: ally (wixmp.com), pewe (anidb.app), kiwi (uwucdn.top with referer)
-# Working via Cloudflare Worker: bee (nekostream.site), moo (animegg.org)
-# Blocked/broken: bonk (vibeplayer.site — pipe returns empty streams), hop
-PROVIDER_ORDER = ["ally", "pewe", "kiwi", "bee", "moo"]
+# Working: ally (wixmp.com), pewe (anidb.app), moo (animegg.org)
+# Blocked from VPS: kiwi (uwucdn.top — 403), bee (same CDN, 403)
+# Broken: bonk (vibeplayer.site — pipe returns empty streams), hop
+PROVIDER_ORDER = ["ally", "pewe", "moo"]
 
 
 def _encode(payload: dict) -> str:
