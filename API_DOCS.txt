@@ -99,7 +99,8 @@ TABLE OF CONTENTS
 
       source    (string, optional)
           Force a specific backend source: "miruro", "anikoto", "reanime", "playwright".
-          Default: auto (miruro pipe → playwright fallback).
+          Default: auto (anikoto first → miruro pipe → playwright fallback).
+          anikoto is the primary source (vidtube.site CDN, reliable from VPS).
           anikoto supports English dubs via &dub=true
 
     EXAMPLES:
@@ -138,10 +139,10 @@ TABLE OF CONTENTS
 
       format    — "hls" (primary) or "mp4" (fallback). Use for player source type.
 
-      source    — Which provider chain served this:
-                    miruro/ally    → wixmp.com CDN (AWS CloudFront) ✓
-                    miruro/moo     → animegg.org CDN ✓
-                    anikoto        → vidtube.site (anikotv.to scraper) ✓
+      source    — Which provider served this:
+                    anikoto        → vidtube.site / megaplay.buzz (reliable) ✓
+                    miruro/ally    → wixmp.com CDN (intermittent)
+                    miruro/moo     → animegg.org CDN (intermittent)
                     miruro/pewe    → anidb.app CDN (intermittent)
                     miruro/bee     → same CDN as kiwi (blocked)
                     miruro/bonk    → vibeplayer.site (pipe returns no streams)
@@ -474,25 +475,20 @@ TABLE OF CONTENTS
     Provider names from this list can be passed as the `provider` parameter
     to /api/stream for server selection.
 
-    Working providers (auto-try order: ally → pewe → moo):
-      ally  → wixmp.com (AWS CloudFront) ✅ sub only
-      moo   → animegg.org ✅ sub only
-
-    Explicit source option:
-      anikoto → vidtube.site (via anikototv.to scraper) ✅ sub + dub
-      Use: ?source=anikoto (or ?source=anikoto&dub=true for English dub)
-
-    Intermittent:
-      pewe  → anidb.app (sometimes needs Cloudflare Worker)
+    Working providers (auto-try order: anikoto → ally → pewe → moo):
+      anikoto → vidtube.site / megaplay.buzz (reliable) ✅ sub + dub
+      ally    → wixmp.com (AWS CloudFront) ⚠️ intermittent
+      moo     → animegg.org ⚠️ intermittent
+      pewe    → anidb.app ⚠️ intermittent (sometimes via Worker)
 
     Blocked/broken:
-      kiwi  → uwucdn.top (403 from VPS)
+      kiwi  → uwucdn.top (403 from VPS + Cloudflare)
       bee   → same CDN as kiwi (uwucdn.top, 403)
       bonk  → pipe returns empty streams
       hop   → no streams available
 
     English Dubs:
-      anikoto (vidtube.site) via ?source=anikoto&dub=true
+      anikoto (vidtube.site) via default or ?source=anikoto&dub=true
       Miruro pipe lacks working dub providers (bonk/bee/hop all blocked/broken)
 
     Source suffix "/cf" means the stream was proxied through the Cloudflare
