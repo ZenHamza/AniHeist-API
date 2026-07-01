@@ -69,16 +69,7 @@ class UnifiedAdapter(BaseAdapter):
                 log.warning("Miruro pipe failed", error=str(e))
             raise ParserError(f"All providers failed: {'; '.join(errors)}")
 
-        # 1. Anikoto (default - vidtube/megaplay embed player, reliable from VPS)
-        if anilist_id > 0 and source in ("", "anikoto"):
-            try:
-                log.info("Trying Anikoto", anime_id=anilist_id, episode=episode)
-                return await get_anikoto_stream(anilist_id, episode, dub=kwargs.get("dub", False))
-            except Exception as e:
-                errors.append(f"anikoto: {e}")
-                log.warning("Anikoto failed", error=str(e))
-
-        # 2. Miruro Pipe API (miruro.to internal backend - direct HLS when CDN works)
+        # 1. Miruro Pipe (primary - direct HLS when CDN works)
         if anilist_id > 0 and source in ("", "miruro"):
             try:
                 log.info("Trying Miruro pipe", anime_id=anilist_id, episode=episode)
@@ -89,6 +80,15 @@ class UnifiedAdapter(BaseAdapter):
             except Exception as e:
                 errors.append(f"miruro_pipe: {e}")
                 log.warning("Miruro pipe failed", error=str(e))
+
+        # 2. Anikoto (fallback - vidtube/megaplay embed player)
+        if anilist_id > 0 and source in ("", "anikoto"):
+            try:
+                log.info("Trying Anikoto", anime_id=anilist_id, episode=episode)
+                return await get_anikoto_stream(anilist_id, episode, dub=kwargs.get("dub", False))
+            except Exception as e:
+                errors.append(f"anikoto: {e}")
+                log.warning("Anikoto failed", error=str(e))
 
         # 3. ReAnime API (reanime.to + flixcloud.cc) - only when explicitly requested (Cloudflare-blocked)
         if source == "reanime":
