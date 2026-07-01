@@ -248,6 +248,16 @@ class MiruroPipe:
                             continue
 
                     via_worker = best.get("_via_worker", False)
+                    if not via_worker and settings.cloudflare_worker_url and "wixmp" in best["url"]:
+                        worker_base = settings.cloudflare_worker_url.rstrip("/")
+                        s_ref = stream_headers.get("Referer", f"https://{pname}.to/")
+                        import urllib.parse
+                        params = urllib.parse.urlencode({
+                            "url": best["url"], "referer": s_ref,
+                            "origin": s_ref.rstrip("/"),
+                        })
+                        best["url"] = f"{worker_base}?{params}"
+                        via_worker = True
                     return StreamResult(
                         url=best["url"],
                         source=f"miruro/{pname}{'/cf' if via_worker else ''}",
