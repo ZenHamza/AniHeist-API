@@ -337,6 +337,70 @@ async def get_providers(
         })
 
 
+@app.get(f"{settings.api_prefix}/anime/{{anime_id}}/sources")
+@rate_limiter.limit("60/minute")
+async def get_sources(
+    request: Request,
+    anime_id: int = Path(..., description="AniList anime ID", ge=1),
+):
+    start_time = time.monotonic()
+    log.info("Sources request", anime_id=anime_id)
+
+    sub = False
+    dub = False
+    sources = []
+
+    # Check Miruro pipe
+    try:
+        from consumet_api.miruro_pipe import MiruroPipe
+        mp = MiruroPipe()
+        providers = await mp.get_providers_for_anime(anime_id)
+        has_sub = any(p.get("episodes", {}).get("sub", 0) > 0 for p in providers)
+        has_dub = any(p.get("episodes", {}).get("dub", 0) > 0 for p in providers)
+        if has_sub:
+            sub = True
+            sources.append({"name": "miruro", "type": "sub", "providers": [p["name"] for p in providers if p.get("episodes", {}).get("sub", 0) > 0]})
+        if has_dub:
+            dub = True
+            sources.append({"name": "miruro", "type": "dub", "providers": [p["name"] for p in providers if p.get("episodes", {}).get("dub", 0) > 0]})
+    except Exception:
+        pass
+
+    # Check Anikoto
+    try:
+        from src.adapters.anikoto_scraper import _get_anilist_title, _search_anikoto, _get_show_id, _get_episode_list
+        title = await _get_anilist_title(anime_id)
+        if title:
+            results = await _search_anikoto(title)
+            if results:
+                show_id = await _get_show_id(results[0]["slug"])
+                if show_id:
+                    ep_list = await _get_episode_list(show_id)
+                    if ep_list:
+                        sub = True
+                        sources.append({"name": "anikoto", "type": "sub"})
+                        # Check if any episode has dub servers by looking at the first ep's server list
+                        from src.adapters.anikoto_scraper import _get_servers
+                        servers = await _get_servers(ep_list[0]["ids"], audio="dub")
+                        if servers:
+                            dub = True
+                            sources.append({"name": "anikoto", "type": "dub"})
+    except Exception:
+        pass
+
+    response_time_ms = round((time.monotonic() - start_time) * 1000, 1)
+    return {
+        "status": "success",
+        "data": {
+            "anime_id": anime_id,
+            "sub_available": sub,
+            "dub_available": dub,
+            "sources": sources,
+        },
+        "meta": {"response_time_ms": response_time_ms},
+    }
+
+
 @app.get(f"{settings.api_prefix}/proxy/hls")
 @rate_limiter.limit("120/minute")
 async def proxy_hls(

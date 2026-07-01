@@ -88,6 +88,7 @@ https://api.aniheist.com
 | `GET` | `/api/stream?anime_id={id}&episode={n}&provider=pewe` | Get stream from specific provider |
 | `GET` | `/api/stream?anime_id={id}&episode={n}&source=reanime` | Get stream from specific source |
 | `GET` | `/api/anime/{id}/providers` | List available providers for anime UI picker |
+| `GET` | `/api/anime/{id}/sources` | Sub/Dub availability for toggle button |
 | `GET` | `/api/search?q={query}` | Search anime by title |
 | `GET` | `/api/anime/{id}` | Get anime details & episodes |
 | `GET` | `/api/trending` | Trending anime |
