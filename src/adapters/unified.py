@@ -10,6 +10,7 @@ from typing import Optional
 from src.adapters.base import BaseAdapter
 from src.adapters.miruro import MiruroAdapter
 from src.adapters.reanime import ReAnimeAdapter
+from src.adapters.anikoto_scraper import get_anikoto_stream
 from src.models.stream import StreamResult, ParserError
 from src.utils.logger import get_logger
 from consumet_api.miruro_pipe import MiruroPipe
@@ -68,7 +69,16 @@ class UnifiedAdapter(BaseAdapter):
                 errors.append(f"miruro_pipe: {e}")
                 log.warning("Miruro pipe failed", error=str(e))
 
-        # 2. ReAnime API (reanime.to + flixcloud.cc) - only when explicitly requested (Cloudflare-blocked)
+        # 2. Anikoto (direct HTTP scraping, no browser) - explicit only
+        if source == "anikoto":
+            try:
+                log.info("Trying Anikoto", anime_id=anilist_id, episode=episode)
+                return await get_anikoto_stream(anilist_id, episode, dub=kwargs.get("dub", False))
+            except Exception as e:
+                errors.append(f"anikoto: {e}")
+                log.warning("Anikoto failed", error=str(e))
+
+        # 3. ReAnime API (reanime.to + flixcloud.cc) - only when explicitly requested (Cloudflare-blocked)
         if source == "reanime":
             try:
                 log.info("Trying ReAnime", anime_id=anime_id, episode=episode)

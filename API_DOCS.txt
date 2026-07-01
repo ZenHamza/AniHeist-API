@@ -97,8 +97,9 @@ TABLE OF CONTENTS
           Leave empty for default order (ally → pewe).
 
       source    (string, optional)
-          Force a specific backend source: "miruro", "reanime", "playwright".
+          Force a specific backend source: "miruro", "anikoto", "reanime", "playwright".
           Default: auto (miruro pipe → playwright fallback).
+          anikoto supports English dubs via &dub=true
 
     EXAMPLES:
 
@@ -138,11 +139,10 @@ TABLE OF CONTENTS
 
       source    — Which provider chain served this:
                     miruro/ally    → wixmp.com CDN (AWS CloudFront) ✓
-                    miruro/pewe    → anidb.app CDN ✓
-                    miruro/pewe/cf → anidb.app CDN via Cloudflare Worker ✓
-                    miruro/kiwi    → uwucdn.top CDN ✓
                     miruro/moo     → animegg.org CDN ✓
-                    miruro/bee     → same CDN as kiwi (wrong referer, blocked)
+                    anikoto        → vidtube.site (anikotv.to scraper) ✓
+                    miruro/pewe    → anidb.app CDN (intermittent)
+                    miruro/bee     → same CDN as kiwi (blocked)
                     miruro/bonk    → vibeplayer.site (pipe returns no streams)
                     miruro/hop     → (no streams)
 
@@ -474,15 +474,25 @@ TABLE OF CONTENTS
     to /api/stream for server selection.
 
     Working providers (auto-try order: ally → pewe → moo):
-      ally  → wixmp.com (AWS CloudFront) ✅
-      pewe  → anidb.app (sometimes needs Cloudflare Worker) ✅
-      moo   → animegg.org ✅
+      ally  → wixmp.com (AWS CloudFront) ✅ sub only
+      moo   → animegg.org ✅ sub only
+
+    Explicit source option:
+      anikoto → vidtube.site (via anikototv.to scraper) ✅ sub + dub
+      Use: ?source=anikoto (or ?source=anikoto&dub=true for English dub)
+
+    Intermittent:
+      pewe  → anidb.app (sometimes needs Cloudflare Worker)
 
     Blocked/broken:
       kiwi  → uwucdn.top (403 from VPS)
       bee   → same CDN as kiwi (uwucdn.top, 403)
       bonk  → pipe returns empty streams
       hop   → no streams available
+
+    English Dubs:
+      anikoto (vidtube.site) via ?source=anikoto&dub=true
+      Miruro pipe lacks working dub providers (bonk/bee/hop all blocked/broken)
 
     Source suffix "/cf" means the stream was proxied through the Cloudflare
     Worker (aniheist-api.zenxhamza.workers.dev). This is transparent to you —
