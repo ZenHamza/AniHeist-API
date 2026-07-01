@@ -188,7 +188,7 @@ class MiruroPipe:
                         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
                     }
                     # Quick CDN accessibility check — skip if blocked
-                    # Tries: direct → proxy pool → Cloudflare Worker
+                    # Tries: direct → Cloudflare Worker → proxy pool
                     fmt = "hls" if best.get("type") == "hls" else "mp4"
 
                     async def _try_cdn(proxy_url: str = "") -> Optional[bool]:
@@ -209,20 +209,7 @@ class MiruroPipe:
                         log.warning("CDN blocked/unreachable directly", provider=pname)
                         proxied = False
 
-                        # Layer 1: proxy pool
-                        if self._proxy_pool:
-                            pool = self._proxy_pool
-                            await pool.ensure_fresh()
-                            p_url = pool.get_proxy_url()
-                            if p_url:
-                                if await _try_cdn(proxy_url=p_url):
-                                    log.info("CDN accessible via proxy", provider=pname, proxy=p_url[:40])
-                                    pool.mark_success()
-                                    proxied = True
-                                else:
-                                    pool.mark_failure()
-
-                        # Layer 2: Cloudflare Worker (CF→CF bypasses Cloudflare blocks)
+                        # Layer 1: Cloudflare Worker (fast, reliable for CF-protected CDNs)
                         if not proxied and settings.cloudflare_worker_url:
                             worker_base = settings.cloudflare_worker_url.rstrip("/")
                             s_ref = best.get("referer") or f"https://{pname}.to/"
@@ -242,6 +229,19 @@ class MiruroPipe:
                                     proxied = True
                             except Exception as we:
                                 log.warning("Cloudflare Worker check failed", provider=pname, error=str(we))
+
+                        # Layer 2: proxy pool
+                        if not proxied and self._proxy_pool:
+                            pool = self._proxy_pool
+                            await pool.ensure_fresh()
+                            p_url = pool.get_proxy_url()
+                            if p_url:
+                                if await _try_cdn(proxy_url=p_url):
+                                    log.info("CDN accessible via proxy", provider=pname, proxy=p_url[:40])
+                                    pool.mark_success()
+                                    proxied = True
+                                else:
+                                    pool.mark_failure()
 
                         if not proxied:
                             last_error = f"{pname}: CDN blocked"
