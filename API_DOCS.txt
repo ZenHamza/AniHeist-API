@@ -140,13 +140,14 @@ TABLE OF CONTENTS
       format    — "hls" (primary) or "mp4" (fallback). Use for player source type.
 
       source    — Which provider served this:
-                    anikoto        → vidtube.site / megaplay.buzz (reliable) ✓
-                    miruro/ally    → wixmp.com CDN (intermittent)
-                    miruro/moo     → animegg.org CDN (intermittent)
-                    miruro/pewe    → anidb.app CDN (intermittent)
-                    miruro/bee     → same CDN as kiwi (blocked)
-                    miruro/bonk    → vibeplayer.site (pipe returns no streams)
-                    miruro/hop     → (no streams)
+                    anikoto        → vidtube.site / megaplay.buzz / vidwish.live
+                    miruro/ally    → wixmp.com (AWS CloudFront) — direct HLS
+                    miruro/moo     → animegg.org — direct MP4
+                    miruro/pewe    → anidb.app (intermittent)
+
+                  format field tells you how to use the URL:
+                    "hls"/"mp4" → direct video — pass to hls.js / <video>
+                    "embed"     → player page — display in an iframe
 
       headers   — Some CDNs require these Referer/Origin headers to serve
                   video segments. If your browser blocks the stream, proxy
@@ -475,21 +476,23 @@ TABLE OF CONTENTS
     Provider names from this list can be passed as the `provider` parameter
     to /api/stream for server selection.
 
-    Working providers (auto-try order: anikoto → ally → pewe → moo):
-      anikoto → vidtube.site / megaplay.buzz (reliable) ✅ sub + dub
-      ally    → wixmp.com (AWS CloudFront) ⚠️ intermittent
-      moo     → animegg.org ⚠️ intermittent
-      pewe    → anidb.app ⚠️ intermittent (sometimes via Worker)
+    Working providers:
+      default (no params) → anikoto embed (vidtube.site) ✅ reliable
+      ?source=anikoto     → vidtube.site / megaplay.buzz embed ✅ sub + dub
+      ?source=miruro      → miruro pipe (ally→moo) direct HLS/MP4 ✅ when CDN works
+      ?provider=ally      → wixmp.com direct HLS ✅
+      ?provider=moo       → animegg.org direct MP4 ✅
+      ?provider=pewe      → anidb.app ⚠️ intermittent
 
-    Blocked/broken:
-      kiwi  → uwucdn.top (403 from VPS + Cloudflare)
-      bee   → same CDN as kiwi (uwucdn.top, 403)
-      bonk  → pipe returns empty streams
-      hop   → no streams available
+    format field behavior:
+      "hls"/"mp4" → direct video URL — pass to hls.js or <video> tag
+      "embed"     → JS player page — display in an iframe:
+                     <iframe src="{video_url}" width="100%" height="500" 
+                             allowfullscreen frameborder="0"></iframe>
 
     English Dubs:
-      anikoto (vidtube.site) via default or ?source=anikoto&dub=true
-      Miruro pipe lacks working dub providers (bonk/bee/hop all blocked/broken)
+      anikoto via ?source=anikoto&dub=true (embed)
+      Miruro pipe lacks working dub providers
 
     Source suffix "/cf" means the stream was proxied through the Cloudflare
     Worker (aniheist-api.zenxhamza.workers.dev). This is transparent to you —

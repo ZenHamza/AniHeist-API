@@ -57,7 +57,19 @@ class UnifiedAdapter(BaseAdapter):
         if provider:
             preferred = [p.strip() for p in provider.split(",")]
 
-        # 1. Anikoto (most reliable - 3 working CDNs from VPS)
+        # When a specific Miruro provider is requested, skip Anikoto and go straight to Miruro
+        if provider and source in ("", "miruro"):
+            log.info("Trying Miruro pipe with specific provider", anime_id=anilist_id, episode=episode, provider=preferred)
+            try:
+                return await self.miruro_pipe.get_stream(
+                    anilist_id, episode, category=category, preferred_providers=preferred
+                )
+            except Exception as e:
+                errors.append(f"miruro_pipe: {e}")
+                log.warning("Miruro pipe failed", error=str(e))
+            raise ParserError(f"All providers failed: {'; '.join(errors)}")
+
+        # 1. Anikoto (default - vidtube/megaplay embed player, reliable from VPS)
         if anilist_id > 0 and source in ("", "anikoto"):
             try:
                 log.info("Trying Anikoto", anime_id=anilist_id, episode=episode)
@@ -66,12 +78,12 @@ class UnifiedAdapter(BaseAdapter):
                 errors.append(f"anikoto: {e}")
                 log.warning("Anikoto failed", error=str(e))
 
-        # 2. Miruro Pipe API (miruro.to internal backend - CDNs are unreliable from VPS)
+        # 2. Miruro Pipe API (miruro.to internal backend - direct HLS when CDN works)
         if anilist_id > 0 and source in ("", "miruro"):
             try:
-                log.info("Trying Miruro pipe", anime_id=anilist_id, episode=episode, provider=preferred)
+                log.info("Trying Miruro pipe", anime_id=anilist_id, episode=episode)
                 result = await self.miruro_pipe.get_stream(
-                    anilist_id, episode, category=category, preferred_providers=preferred
+                    anilist_id, episode, category=category
                 )
                 return result
             except Exception as e:
