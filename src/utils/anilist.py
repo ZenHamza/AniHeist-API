@@ -95,7 +95,7 @@ query ($page: Int, $perPage: Int) {
 NEWEST_QUERY = """
 query ($page: Int, $perPage: Int) {
   Page(page: $page, perPage: $perPage) {
-    media(sort: TRENDING_DESC, type: ANIME, format: TV, status: RELEASING) {
+    media(sort: TRENDING_DESC, type: ANIME, status: RELEASING) {
       id
       title { romaji english }
       coverImage { large }
