@@ -92,6 +92,25 @@ query ($page: Int, $perPage: Int) {
 }
 """
 
+NEWEST_QUERY = """
+query ($page: Int, $perPage: Int) {
+  Page(page: $page, perPage: $perPage) {
+    media(sort: START_DATE_DESC, type: ANIME, format: TV) {
+      id
+      title { romaji english }
+      coverImage { large }
+      episodes
+      format
+      averageScore
+      seasonYear
+      genres
+      status
+      description
+    }
+  }
+}
+"""
+
 POPULAR_QUERY = """
 query ($page: Int, $perPage: Int) {
   Page(page: $page, perPage: $perPage) {
@@ -241,6 +260,14 @@ async def get_trending(page: int = 1, per_page: int = 20) -> list[dict]:
 async def get_popular(page: int = 1, per_page: int = 20) -> list[dict]:
     """Get most popular anime."""
     data = await _query(POPULAR_QUERY, {"page": page, "perPage": per_page})
+    if not data:
+        return []
+    return _format_media_list(data.get("Page", {}).get("media", []))
+
+
+async def get_newest(page: int = 1, per_page: int = 20) -> list[dict]:
+    """Get newest TV anime (sorted by start date, TV format only)."""
+    data = await _query(NEWEST_QUERY, {"page": page, "perPage": per_page})
     if not data:
         return []
     return _format_media_list(data.get("Page", {}).get("media", []))

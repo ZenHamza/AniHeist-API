@@ -91,6 +91,7 @@ https://api.aniheist.com
 | `GET` | `/api/search?q={query}` | Search anime by title |
 | `GET` | `/api/anime/{id}` | Get anime details & episodes |
 | `GET` | `/api/trending` | Trending anime |
+| `GET` | `/api/newest` | Newest TV-only anime (no ONAs/OVAs) |
 | `GET` | `/api/popular` | Popular anime |
 | `GET` | `/api/health` | Service health status |
 | `GET` | `/api/proxy/status` | Proxy pool status |

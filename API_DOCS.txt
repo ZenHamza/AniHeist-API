@@ -28,8 +28,9 @@ TABLE OF CONTENTS
     2.7  GET /api/health           — API health status
     2.8  GET /api/proxy/status     — Proxy pool status
     2.9  GET /api/proxy/hls        — HLS segment proxy with header injection
-    2.10 GET /api/anime/{id}/providers — List available providers
-  3.  FRONTEND INTEGRATION
+     2.10 GET /api/anime/{id}/providers — List available providers
+     2.11 GET /api/newest            — Newest TV anime (no ONAs/OVAs)
+   3.  FRONTEND INTEGRATION
     3.1  hls.js integration (recommended)
     3.2  Video.js integration
   3.3  React / Next.js integration
@@ -482,6 +483,50 @@ TABLE OF CONTENTS
     Source suffix "/cf" means the stream was proxied through the Cloudflare
     Worker (aniheist-api.zenxhamza.workers.dev). This is transparent to you —
     the video_url is already rewritten to point through the Worker.
+
+
+================================================================================
+
+2.11  GET /api/newest  —  Newest TV anime releases
+─────────────────────────────────────────────────────────────────────────────────
+
+    Returns the newest TV-format anime (sorted by AniList start date desc).
+    Filters out ONA, OVA, Movie, and Special formats — only TV shows.
+    Same response format as /api/trending and /api/popular.
+
+    PARAMETERS:
+
+      page      (integer, optional, default=1)
+      per_page  (integer, optional, default=20, max=50)
+
+    EXAMPLE:
+
+      curl "https://api.aniheist.com/api/newest?per_page=5"
+
+    RESPONSE:
+
+      {
+        "status": "success",
+        "data": [
+          {
+            "id": 123456,
+            "title": "Some New Anime",
+            "cover_image": "https://img.anili.st/media/123456",
+            "episodes": null,
+            "format": "TV",
+            "score": null,
+            "year": null,
+            "genres": ["Action", "Fantasy"],
+            "status": "NOT_YET_RELEASED",
+            "description": "Description text..."
+          }
+        ],
+        "meta": {"page": 1, "count": 5, "response_time_ms": 320}
+      }
+
+    Use this for the "Newest" section on your homepage instead of /api/trending
+    if you want only TV-format anime without ONAs/OVAs/Movies interfering.
+
 
 ================================================================================
 3.  FRONTEND INTEGRATION
