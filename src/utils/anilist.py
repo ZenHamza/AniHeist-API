@@ -111,6 +111,44 @@ query ($page: Int, $perPage: Int) {
 }
 """
 
+RECENT_QUERY = """
+query ($page: Int, $perPage: Int) {
+  Page(page: $page, perPage: $perPage) {
+    media(sort: TRENDING_DESC, type: ANIME, status: RELEASING) {
+      id
+      title { romaji english }
+      coverImage { large }
+      episodes
+      format
+      averageScore
+      seasonYear
+      genres
+      status
+      description
+    }
+  }
+}
+"""
+
+TOP_RATED_QUERY = """
+query ($page: Int, $perPage: Int) {
+  Page(page: $page, perPage: $perPage) {
+    media(sort: SCORE_DESC, type: ANIME, averageScore_greater: 1) {
+      id
+      title { romaji english }
+      coverImage { large }
+      episodes
+      format
+      averageScore
+      seasonYear
+      genres
+      status
+      description
+    }
+  }
+}
+"""
+
 POPULAR_QUERY = """
 query ($page: Int, $perPage: Int) {
   Page(page: $page, perPage: $perPage) {
@@ -124,6 +162,7 @@ query ($page: Int, $perPage: Int) {
       seasonYear
       genres
       status
+      description
     }
   }
 }
@@ -268,6 +307,22 @@ async def get_popular(page: int = 1, per_page: int = 20) -> list[dict]:
 async def get_newest(page: int = 1, per_page: int = 20) -> list[dict]:
     """Get newest TV anime (sorted by start date, TV format only)."""
     data = await _query(NEWEST_QUERY, {"page": page, "perPage": per_page})
+    if not data:
+        return []
+    return _format_media_list(data.get("Page", {}).get("media", []))
+
+
+async def get_recent(page: int = 1, per_page: int = 20) -> list[dict]:
+    """Get currently-airing anime sorted by trending (Miruro 'Recent' section)."""
+    data = await _query(RECENT_QUERY, {"page": page, "perPage": per_page})
+    if not data:
+        return []
+    return _format_media_list(data.get("Page", {}).get("media", []))
+
+
+async def get_top_rated(page: int = 1, per_page: int = 20) -> list[dict]:
+    """Get highest-rated anime (Miruro 'Top Rated' section)."""
+    data = await _query(TOP_RATED_QUERY, {"page": page, "perPage": per_page})
     if not data:
         return []
     return _format_media_list(data.get("Page", {}).get("media", []))

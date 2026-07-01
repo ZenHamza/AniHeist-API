@@ -26,6 +26,8 @@ from src.utils.anilist import (
     get_trending,
     get_popular,
     get_newest,
+    get_recent,
+    get_top_rated,
 )
 
 setup_logging(log_level=settings.log_level, json_output=settings.json_logging)
@@ -247,6 +249,40 @@ async def newest_anime(
 ):
     start_time = time.monotonic()
     data = await get_newest(page, per_page)
+    response_time_ms = round((time.monotonic() - start_time) * 1000, 1)
+    return {
+        "status": "success",
+        "data": data,
+        "meta": {"page": page, "count": len(data), "response_time_ms": response_time_ms},
+    }
+
+
+@app.get(f"{settings.api_prefix}/recent")
+@rate_limiter.limit("60/minute")
+async def recent_anime(
+    request: Request,
+    page: int = Query(1, ge=1, description="Page number"),
+    per_page: int = Query(20, ge=1, le=50, description="Results per page"),
+):
+    start_time = time.monotonic()
+    data = await get_recent(page, per_page)
+    response_time_ms = round((time.monotonic() - start_time) * 1000, 1)
+    return {
+        "status": "success",
+        "data": data,
+        "meta": {"page": page, "count": len(data), "response_time_ms": response_time_ms},
+    }
+
+
+@app.get(f"{settings.api_prefix}/top-rated")
+@rate_limiter.limit("60/minute")
+async def top_rated_anime(
+    request: Request,
+    page: int = Query(1, ge=1, description="Page number"),
+    per_page: int = Query(20, ge=1, le=50, description="Results per page"),
+):
+    start_time = time.monotonic()
+    data = await get_top_rated(page, per_page)
     response_time_ms = round((time.monotonic() - start_time) * 1000, 1)
     return {
         "status": "success",
