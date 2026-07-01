@@ -473,14 +473,14 @@ TABLE OF CONTENTS
     Provider names from this list can be passed as the `provider` parameter
     to /api/stream for server selection.
 
-    Working providers (from VPS):
-      ally  → wixmp.com (direct, fastest)
-      pewe  → anidb.app (direct or via Cloudflare Worker)
-      kiwi  → uwucdn.top (direct with Referer header)
-      moo   → animegg.org (direct)
+    Working providers (auto-try order: ally → pewe → moo):
+      ally  → wixmp.com (AWS CloudFront) ✅
+      pewe  → anidb.app (sometimes needs Cloudflare Worker) ✅
+      moo   → animegg.org ✅
 
     Blocked/broken:
-      bee   → same CDN as kiwi (uwucdn.top) but wrong Referer → 403
+      kiwi  → uwucdn.top (403 from VPS)
+      bee   → same CDN as kiwi (uwucdn.top, 403)
       bonk  → pipe returns empty streams
       hop   → no streams available
 

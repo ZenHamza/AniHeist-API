@@ -27,7 +27,7 @@ class Settings(BaseSettings):
     navigation_timeout: int = 15000
     element_wait_timeout: int = 10000
 
-    circuit_breaker_threshold: int = 5
+    circuit_breaker_threshold: int = 50
     circuit_breaker_timeout: int = 60
     max_retries_per_source: int = 2
     retry_base_delay: float = 1.0
